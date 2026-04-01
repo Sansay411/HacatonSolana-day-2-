@@ -1,0 +1,405 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useWallet } from "@solana/wallet-adapter-react";
+import AppShell from "../components/AppShell";
+import { CheckCircleIcon, GridIcon, ShieldIcon, AlertCircleIcon } from "../components/Icons";
+import { useVaultActions } from "../hooks/useVaultActions";
+import { useI18n } from "../i18n";
+import { apiFetch } from "../lib/api";
+
+function shortKey(key?: string | null, fallback?: string) {
+  if (!key) return fallback || "";
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
+export default function CreateVault() {
+  const { publicKey } = useWallet();
+  const navigate = useNavigate();
+  const { createVault, pending } = useVaultActions();
+  const { t } = useI18n();
+
+  const [beneficiary, setBeneficiary] = useState("");
+  const [depositAmount, setDepositAmount] = useState("5");
+  const [perTxLimit, setPerTxLimit] = useState("1");
+  const [totalLimit, setTotalLimit] = useState("10");
+  const [cooldownSeconds, setCooldownSeconds] = useState("60");
+  const [riskThreshold, setRiskThreshold] = useState("70");
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [runtime, setRuntime] = useState<{
+    riskAuthority: {
+      publicKey: string;
+      balanceSol: number;
+      ready: boolean;
+      isEphemeral: boolean;
+      warnings: string[];
+    };
+  } | null>(null);
+
+  const RISK_AUTHORITY = import.meta.env.VITE_RISK_AUTHORITY || "";
+  const effectiveRiskAuthority =
+    runtime?.riskAuthority.publicKey || RISK_AUTHORITY || publicKey?.toBase58() || "";
+
+  useEffect(() => {
+    let active = true;
+
+    const loadRuntime = async () => {
+      try {
+        const response = await apiFetch("/api/system/runtime");
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        if (active) {
+          setRuntime(data);
+        }
+      } catch {
+        if (active) {
+          setRuntime(null);
+        }
+      }
+    };
+
+    loadRuntime();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const depositValue = parseFloat(depositAmount) || 0;
+  const perTxValue = parseFloat(perTxLimit) || 0;
+  const totalLimitValue = parseFloat(totalLimit) || 0;
+  const cooldownValue = parseInt(cooldownSeconds, 10) || 0;
+  const riskValue = parseInt(riskThreshold, 10) || 0;
+
+  const summary = useMemo(
+    () => [
+      { label: t("create.summary.initialFunding"), value: `${depositValue.toFixed(2)} SOL` },
+      { label: t("create.summary.perRequest"), value: `${perTxValue.toFixed(2)} SOL` },
+      { label: t("create.summary.totalCap"), value: `${totalLimitValue.toFixed(2)} SOL` },
+      { label: t("create.summary.cooldown"), value: `${cooldownValue}s` },
+    ],
+    [cooldownValue, depositValue, perTxValue, totalLimitValue, t]
+  );
+
+  const handleCreate = async () => {
+    if (!publicKey || !beneficiary) return;
+
+    if (runtime && !runtime.riskAuthority.ready) {
+      setToast({ msg: t("create.executorNeedsAttention"), type: "error" });
+      setTimeout(() => setToast(null), 4000);
+      return;
+    }
+
+    const result = await createVault({
+      beneficiary,
+      riskAuthority: effectiveRiskAuthority,
+      depositSol: depositValue,
+      perTxLimitSol: perTxValue || 1,
+      totalLimitSol: totalLimitValue || 10,
+      cooldownSeconds: cooldownValue || 60,
+      riskThreshold: riskValue || 70,
+    });
+
+    if (result.success && result.vaultAddress) {
+      setToast({ msg: t("create.toastSuccess"), type: "success" });
+      setTimeout(() => navigate(`/vault/${result.vaultAddress}`), 1500);
+    } else {
+      setToast({ msg: result.error || t("create.toastError"), type: "error" });
+      setTimeout(() => setToast(null), 4000);
+    }
+  };
+
+  return (
+    <AppShell>
+      <section className="page-heading">
+        <div>
+          <div className="eyebrow-pill">{t("create.eyebrow")}</div>
+          <h1 className="page-title">{t("create.title")}</h1>
+          <p className="page-subtitle">{t("create.subtitle")}</p>
+        </div>
+
+        <div className="page-heading-actions">
+          <Link to="/console" className="btn btn-ghost">
+            <GridIcon className="icon-svg icon-svg-sm" />
+            {t("create.back")}
+          </Link>
+        </div>
+      </section>
+
+      <section className="create-hero-ribbon">
+        <div className="surface-card create-ribbon-card create-ribbon-card-accent">
+          <span className="surface-kicker">{t("create.ribbon.funding")}</span>
+          <strong>{depositValue.toFixed(2)} SOL</strong>
+          <p>{t("create.ribbon.fundingText")}</p>
+        </div>
+        <div className="surface-card create-ribbon-card">
+          <span className="surface-kicker">{t("create.ribbon.risk")}</span>
+          <strong>{riskValue}/100</strong>
+          <p>{t("create.ribbon.riskText")}</p>
+        </div>
+        <div className="surface-card create-ribbon-card create-ribbon-card-dark">
+          <span className="surface-kicker">{t("create.ribbon.execution")}</span>
+          <strong>{cooldownValue}s</strong>
+          <p>{t("create.ribbon.executionText")}</p>
+        </div>
+      </section>
+
+      <section className="workspace-grid workspace-grid-enhanced">
+        <div className="workspace-main-stack">
+          <div className="surface-card workspace-panel workspace-panel-primary">
+            <div className="panel-topline">
+              <div>
+                <span className="surface-kicker">{t("create.configKicker")}</span>
+                <h2>{t("create.configTitle")}</h2>
+              </div>
+              <span className="status-pill status-pill-success">{t("create.ready")}</span>
+            </div>
+
+            <div className="field-block">
+              <label className="field-label" htmlFor="beneficiary">{t("create.beneficiary")}</label>
+              <input
+                id="beneficiary"
+                className="premium-input"
+                type="text"
+                placeholder={t("create.beneficiaryPlaceholder")}
+                value={beneficiary}
+                onChange={(e) => setBeneficiary(e.target.value)}
+              />
+              <p className="field-hint">{t("create.beneficiaryHint")}</p>
+            </div>
+
+            <div className="workspace-two-up">
+              <div className="field-block">
+                <label className="field-label" htmlFor="deposit-amount">{t("create.deposit")}</label>
+                <div className="input-with-suffix">
+                  <input
+                    id="deposit-amount"
+                    className="premium-input"
+                    type="number"
+                    step="0.1"
+                    min="0.01"
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
+                  />
+                  <span>SOL</span>
+                </div>
+              </div>
+
+              <div className="field-block">
+                <label className="field-label" htmlFor="cooldown">{t("create.cooldown")}</label>
+                <div className="input-with-suffix">
+                  <input
+                    id="cooldown"
+                    className="premium-input"
+                    type="number"
+                    value={cooldownSeconds}
+                    onChange={(e) => setCooldownSeconds(e.target.value)}
+                  />
+                  <span>{t("create.cooldownUnit")}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="surface-card inner-panel">
+              <div className="panel-topline">
+                <div>
+                  <span className="surface-kicker">{t("create.policyKicker")}</span>
+                  <h3>{t("create.policyTitle")}</h3>
+                </div>
+              </div>
+
+              <div className="workspace-two-up">
+                <div className="field-block">
+                  <label className="field-label" htmlFor="per-tx-limit">{t("create.perTxLimit")}</label>
+                  <div className="input-with-suffix">
+                    <input
+                      id="per-tx-limit"
+                      className="premium-input"
+                      type="number"
+                      step="0.1"
+                      value={perTxLimit}
+                      onChange={(e) => setPerTxLimit(e.target.value)}
+                    />
+                    <span>SOL</span>
+                  </div>
+                </div>
+
+                <div className="field-block">
+                  <label className="field-label" htmlFor="total-limit">{t("create.totalLimit")}</label>
+                  <div className="input-with-suffix">
+                    <input
+                      id="total-limit"
+                      className="premium-input"
+                      type="number"
+                      step="0.1"
+                      value={totalLimit}
+                      onChange={(e) => setTotalLimit(e.target.value)}
+                    />
+                    <span>SOL</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="field-block">
+                <label className="field-label" htmlFor="risk-threshold">{t("create.riskThreshold")}</label>
+                <div className="range-row">
+                  <input
+                    id="risk-threshold"
+                    className="premium-range"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={riskThreshold}
+                    onChange={(e) => setRiskThreshold(e.target.value)}
+                  />
+                  <div className="range-chip">{riskValue}/100</div>
+                </div>
+                <p className="field-hint">{t("create.riskHint")}</p>
+              </div>
+            </div>
+
+            <div className="action-footer">
+              <button
+                className="btn btn-primary btn-xl"
+                onClick={handleCreate}
+                disabled={!publicKey || !beneficiary || pending || Boolean(runtime && !runtime.riskAuthority.ready)}
+                id="btn-create-vault"
+              >
+                <ShieldIcon className="icon-svg icon-svg-sm" />
+                {pending ? t("create.deploying") : t("create.createButton")}
+              </button>
+            </div>
+          </div>
+
+          <div className="workspace-two-up workspace-secondary-grid">
+            <div className="surface-card summary-panel summary-panel-dark">
+              <span className="surface-kicker">{t("create.flowKicker")}</span>
+              <div className="flow-list">
+                <div className="flow-item">
+                  <strong>1</strong>
+                  <div>
+                    <h4>{t("create.flow.step1Title")}</h4>
+                    <p>{t("create.flow.step1Text")}</p>
+                  </div>
+                </div>
+                <div className="flow-item">
+                  <strong>2</strong>
+                  <div>
+                    <h4>{t("create.flow.step2Title")}</h4>
+                    <p>{t("create.flow.step2Text")}</p>
+                  </div>
+                </div>
+                <div className="flow-item">
+                  <strong>3</strong>
+                  <div>
+                    <h4>{t("create.flow.step3Title")}</h4>
+                    <p>{t("create.flow.step3Text")}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="surface-card summary-panel">
+              <span className="surface-kicker">{t("create.intentKicker")}</span>
+              <div className="identity-list">
+                <div className="identity-row">
+                  <span className="identity-title">{t("create.intent.depositRatio")}</span>
+                  <strong>{totalLimitValue > 0 ? `${((depositValue / totalLimitValue) * 100).toFixed(0)}%` : "0%"}</strong>
+                </div>
+                <div className="identity-row">
+                  <span className="identity-title">{t("create.intent.requestRatio")}</span>
+                  <strong>{totalLimitValue > 0 ? `${((perTxValue / totalLimitValue) * 100).toFixed(0)}%` : "0%"}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside className="workspace-aside">
+          <div className="surface-card summary-panel">
+            <div className="panel-topline">
+              <div>
+                <span className="surface-kicker">{t("create.summaryKicker")}</span>
+                <h2>{t("create.summaryTitle")}</h2>
+              </div>
+            </div>
+
+            <div className="summary-grid">
+              {summary.map((item) => (
+                <div key={item.label} className="summary-metric">
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="surface-card summary-panel">
+            <span className="surface-kicker">{t("create.authorityKicker")}</span>
+            <div className="identity-list">
+              <div className="identity-row">
+                <span className="identity-title">{t("create.identity.funder")}</span>
+                <strong>{shortKey(publicKey?.toBase58(), t("create.notConfigured"))}</strong>
+              </div>
+              <div className="identity-row">
+                <span className="identity-title">{t("create.identity.beneficiary")}</span>
+                <strong>{beneficiary ? shortKey(beneficiary) : t("create.awaitingAddress")}</strong>
+              </div>
+              <div className="identity-row">
+                <span className="identity-title">{t("create.identity.riskAuthority")}</span>
+                <strong>{shortKey(effectiveRiskAuthority, t("create.notConfigured"))}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className={`surface-card summary-panel ${runtime && !runtime.riskAuthority.ready ? "summary-panel-dark" : ""}`}>
+            <span className="surface-kicker">{t("create.executorKicker")}</span>
+            <div className="identity-list">
+              <div className="identity-row">
+                <span className="identity-title">{t("create.executorStatus")}</span>
+                <strong>
+                  {runtime
+                    ? runtime.riskAuthority.ready
+                      ? t("create.executorReady")
+                      : t("create.executorNeedsAttention")
+                    : t("create.executorLoading")}
+                </strong>
+              </div>
+              <div className="identity-row">
+                <span className="identity-title">{t("create.executorBalance")}</span>
+                <strong>
+                  {runtime ? `${runtime.riskAuthority.balanceSol.toFixed(4)} SOL` : "—"}
+                </strong>
+              </div>
+              {runtime?.riskAuthority.isEphemeral && (
+                <div className="identity-row">
+                  <span className="identity-title">{t("create.executorMode")}</span>
+                  <strong>{t("create.executorEphemeral")}</strong>
+                </div>
+              )}
+            </div>
+            {runtime?.riskAuthority.warnings?.length ? (
+              <p className="field-hint">{runtime.riskAuthority.warnings[0]}</p>
+            ) : (
+              <p className="field-hint">{t("create.executorHint")}</p>
+            )}
+          </div>
+
+        </aside>
+      </section>
+
+      {toast && (
+        <div className={`toast ${toast.type}`}>
+          <span className="toast-icon">
+            {toast.type === "success" ? (
+              <CheckCircleIcon className="icon-svg icon-svg-sm" />
+            ) : (
+              <AlertCircleIcon className="icon-svg icon-svg-sm" />
+            )}
+          </span>
+          {toast.msg}
+        </div>
+      )}
+    </AppShell>
+  );
+}

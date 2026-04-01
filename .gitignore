@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+target/
+
+# Build outputs
+dist/
+.anchor/
+
+# Environment
+.env
+packages/backend/.env
+packages/backend/*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keypairs (NEVER commit)
+*-keypair.json
+risk-authority.json
+
+# Anchor
+test-ledger/

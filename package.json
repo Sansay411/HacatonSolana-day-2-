@@ -1,0 +1,27 @@
+{
+  "name": "aegis-funding-vault",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "anchor test",
+    "build": "anchor build",
+    "dev:backend": "npm run dev --workspace=packages/backend",
+    "dev:frontend": "npm run dev --workspace=packages/frontend"
+  },
+  "devDependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/web3.js": "^1.95.0",
+    "@types/chai": "^4.3.0",
+    "@types/bn.js": "^5.1.6",
+    "@types/mocha": "^10.0.0",
+    "chai": "^4.4.0",
+    "mocha": "^10.0.0",
+    "ts-mocha": "^10.0.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "bn.js": "^5.2.3"
+  }
+}

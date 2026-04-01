@@ -1,0 +1,27 @@
+{
+  "name": "@aegis/backend",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "npx tsx watch src/index.ts",
+    "start": "npx tsx src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/web3.js": "^1.95.0",
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "better-sqlite3": "^12.8.0",
+    "dotenv": "^16.4.0",
+    "bs58": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.0",
+    "@types/cors": "^2.8.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "typescript": "^5.5.0",
+    "tsx": "^4.0.0"
+  }
+}
