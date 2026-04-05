@@ -14,6 +14,8 @@ const PROGRAM_ID = new PublicKey(
   "9Z6HNGC1wz6ukVCD3qNqnfFMDfCffNPBz6dG5k8fakHc"
 );
 
+const READ_ONLY_PUBLIC_KEY = new PublicKey("11111111111111111111111111111111");
+
 /**
  * Hook to get an Anchor Program instance connected to the current wallet.
  *
@@ -25,10 +27,16 @@ export function useAegisProgram(): anchor.Program<AegisVault> | null {
   const wallet = useWallet();
 
   return useMemo(() => {
-    if (!wallet.publicKey) return null;
-
     try {
-      const provider = new anchor.AnchorProvider(connection, wallet as unknown as anchor.Wallet, {
+      const anchorWallet = wallet.publicKey
+        ? (wallet as unknown as anchor.Wallet)
+        : ({
+            publicKey: READ_ONLY_PUBLIC_KEY,
+            signTransaction: async (transaction) => transaction,
+            signAllTransactions: async (transactions) => transactions,
+          } as anchor.Wallet);
+
+      const provider = new anchor.AnchorProvider(connection, anchorWallet, {
         commitment: "confirmed",
       });
       return new anchor.Program(idl as AegisVault, provider);

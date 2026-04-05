@@ -14,6 +14,7 @@ import brandLogoUrl from "../../../../logo/Logo.png";
 import AuthPanel from "../auth/AuthPanel";
 import { useAuth } from "../auth/useAuth";
 import WalletActionButton from "../components/WalletActionButton";
+import { SOLANA_NETWORK_LABEL } from "../lib/solanaWallets";
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -217,6 +218,10 @@ export default function Landing() {
                     <span>{t("auth.walletLayer")}</span>
                     <strong>{connected ? t("shell.walletOnline") : t("auth.walletPending")}</strong>
                   </div>
+                  <div className="auth-state-row">
+                    <span>{t("wallet.network")}</span>
+                    <strong>{SOLANA_NETWORK_LABEL}</strong>
+                  </div>
                 </div>
 
                 <div className="auth-next-actions">
@@ -226,6 +231,7 @@ export default function Landing() {
                   </button>
                   <WalletActionButton className="btn-secondary" />
                 </div>
+                {!connected && <p className="auth-wallet-hint">{t("wallet.connectAfterAuthHint")}</p>}
               </section>
             ) : (
               <AuthPanel onAuthenticated={() => navigate(nextRoute)} />

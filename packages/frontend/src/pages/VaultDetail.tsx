@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { Link, useParams } from "react-router-dom";
 import AppShell from "../components/AppShell";
+import WalletActionButton from "../components/WalletActionButton";
 import {
   AlertCircleIcon,
   ArrowDownCircleIcon,
@@ -603,6 +605,7 @@ function RequestCard({
 
 export default function VaultDetail() {
   const { vaultAddress } = useParams();
+  const { publicKey } = useWallet();
   const { t, locale } = useI18n();
   const { vault, policy, requests, role, loading, error } = useVault(vaultAddress);
   const { submitSpendRequest, freezeVault, unfreezeVault, deposit, pending } = useVaultActions();
@@ -614,9 +617,9 @@ export default function VaultDetail() {
 
   useEffect(() => {
     if (vaultAddress) {
-      setLastVaultAddress(vaultAddress);
+      setLastVaultAddress(vaultAddress, publicKey?.toBase58());
     }
-  }, [vaultAddress]);
+  }, [publicKey, vaultAddress]);
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });
@@ -650,6 +653,7 @@ export default function VaultDetail() {
   const isBeneficiary = userRole === "beneficiary";
   const isFrozen = v.mode === "frozen";
   const isClosed = v.mode === "closed";
+  const hasConnectedWallet = Boolean(publicKey);
   const usagePercent = p.totalLimit > 0 ? Math.min((v.totalDisbursed / p.totalLimit) * 100, 100) : 0;
   const remainingBudget = Math.max(p.totalLimit - v.totalDisbursed, 0);
   const activeRisk = reqs[0]?.riskScore ?? 0;
@@ -684,6 +688,16 @@ export default function VaultDetail() {
     : isBeneficiary
       ? t("vault.role.beneficiary")
       : t("vault.role.observer");
+  const walletAccessTitle = !hasConnectedWallet
+    ? t("vault.readOnlyTitle")
+    : userRole === "none" && vault
+      ? t("vault.mismatchTitle")
+      : null;
+  const walletAccessText = !hasConnectedWallet
+    ? t("vault.readOnlyText")
+    : userRole === "none" && vault
+      ? t("vault.mismatchText")
+      : null;
 
   const handleSubmitRequest = async () => {
     if (!reqAmount || !reqDesc || !vaultAddress || !vault) return;
@@ -775,6 +789,17 @@ export default function VaultDetail() {
         <div className="surface-card state-banner state-banner-error">
           <span className="surface-kicker">{t("vault.errorKicker")}</span>
           <h3>{error}</h3>
+        </div>
+      )}
+
+      {!loading && !error && vault && walletAccessTitle && walletAccessText && (
+        <div className="surface-card state-banner state-banner-warning">
+          <span className="surface-kicker">{t("vault.accessKicker")}</span>
+          <h3>{walletAccessTitle}</h3>
+          <p>{walletAccessText}</p>
+          <div className="state-banner-actions">
+            <WalletActionButton className="btn-secondary" />
+          </div>
         </div>
       )}
 

@@ -1,109 +1,239 @@
 # Aegis Funding Vault
 
-> **Programmable, policy-enforced funding vaults on Solana where capital stays program-controlled and access adapts to risk.**
+## Что это
 
-## What is this?
+Aegis Funding Vault помогает выдавать деньги не вручную, а по понятным правилам.
 
-Aegis is a programmable funding layer on Solana. Funders deposit capital into program-owned vaults, and beneficiaries access funds through spend requests controlled by on-chain policy and risk scoring.
+Как это работает простыми словами:
 
-**Not a dashboard. Not an escrow. A funding state machine.**
+1. Фаундер создает vault и кладет туда SOL.
+2. Получатель не может просто забрать деньги.
+3. Он отправляет запрос на расход с описанием цели.
+4. Сервер проверяет запрос через Gemini и через жесткие правила.
+5. После этого система принимает решение.
+6. Решение записывается в сеть Solana.
 
-## Architecture
+Проект подходит для:
 
-```
-┌────────────────────────────────────────┐
-│              FRONTEND                  │
-│  React + Vite + Solana Wallet Adapter  │
-│  Funder Dashboard | Beneficiary View   │
-└──────────────┬────────────┬────────────┘
-               │            │
-               │  REST API  │  Direct RPC
-               │            │
-┌──────────────▼──────┐  ┌──▼─────────────┐
-│      BACKEND        │  │  SOLANA PROGRAM │
-│  Express + SQLite   │  │  Anchor / Rust  │
-│  Risk Engine        │──│                 │
-│  Event Listener     │  │  Vault PDA      │
-│  TX Builder         │  │  Policy PDA     │
-└─────────────────────┘  │  SpendReq PDA   │
-                         └─────────────────┘
-```
+- грантов
+- акселераторов
+- стипендий
+- контролируемых выплат командам
 
-## Quick Start
+## Что уже работает
 
-### Prerequisites
+- создание vault
+- пополнение vault
+- отправка запроса на расход
+- проверка запроса через AI
+- запасной безопасный режим, если AI недоступен
+- approve и reject в сети Solana
+- история решений с понятным объяснением
+- вход через Firebase
+- подключение Solana кошелька
 
-- **Rust**: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-- **Solana CLI**: `sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"`
-- **Anchor CLI**: `cargo install --git https://github.com/coral-xyz/anchor avm --force && avm install 0.32.1 && avm use 0.32.1`
-- **Node.js**: v18+
+## Как устроен проект
 
-### Setup
+### `programs/aegis_vault`
+
+Смарт контракт на Anchor.
+Он хранит vault, правила и запросы.
+
+### `packages/backend`
+
+Сервер.
+Он получает запросы, обращается к Gemini, проверяет правила и отправляет итоговое решение в Solana.
+
+### `packages/frontend`
+
+Интерфейс.
+Через него пользователь входит в продукт, подключает кошелек, создает vault и смотрит историю решений.
+
+### `packages/shared`
+
+Общие типы и константы.
+
+## Что нужно для запуска
+
+- Node.js 18 или новее
+- Rust
+- Solana CLI
+- Anchor CLI 0.32.1
+
+## Быстрый запуск
+
+### 1. Установить зависимости
 
 ```bash
-# Clone and install
-cd aegis-funding-vault
 npm install
+```
 
-# Build Solana program
+### 2. Собрать смарт контракт
+
+```bash
 anchor build
+```
 
-# Program ID is already aligned with target/deploy/aegis_vault-keypair.json
-# Rebuild after any on-chain code change:
-anchor build
+### 3. Подготовить backend
 
-# Run tests (starts local validator)
-anchor test
+Скопируйте пример:
 
-# Start backend
+```bash
 cp packages/backend/.env.example packages/backend/.env
-# Edit .env with your risk authority keypair
-npm run dev:backend
+```
 
-# Start frontend (in another terminal)
+Что нужно заполнить:
+
+- `SOLANA_RPC_URL`
+- `RISK_AUTHORITY_SECRET_KEY`
+- `PROGRAM_ID`
+- `GEMINI_API_KEY`
+
+### 4. Подготовить frontend
+
+Скопируйте пример:
+
+```bash
+cp packages/frontend/.env.example packages/frontend/.env
+```
+
+Во frontend уже лежат настройки Firebase.
+Если у вас другой проект Firebase, замените их на свои.
+
+### 5. Запустить backend
+
+```bash
+npm run dev:backend
+```
+
+### 6. Запустить frontend
+
+В другом терминале:
+
+```bash
 npm run dev:frontend
 ```
 
-### Devnet Deployment
+### 7. Открыть проект
+
+```text
+http://localhost:5173/
+```
+
+## Проверка проекта
+
+### Сборка смарт контракта
 
 ```bash
-# Configure Solana CLI for devnet
-solana config set --url devnet
-
-# Airdrop for deployment
-solana airdrop 5
-
-# Deploy
-anchor deploy --provider.cluster devnet
+anchor build
 ```
 
-## Project Structure
+### Тесты смарт контракта
 
-```
-├── programs/aegis_vault/src/     # On-chain Anchor program
-│   ├── lib.rs                    # Program entrypoint
-│   ├── instructions/             # 8 instruction handlers
-│   ├── state/                    # Vault, Policy, SpendRequest
-│   ├── errors.rs                 # Custom error codes
-│   └── events.rs                 # Audit trail events
-├── packages/
-│   ├── shared/src/               # Shared types, PDA helpers, constants
-│   ├── backend/src/              # Express server, risk engine, Solana client
-│   └── frontend/src/             # React + Vite dashboard
-└── tests/                        # Anchor integration tests
+```bash
+anchor test
 ```
 
-## Trust Model
+### Сборка frontend
 
-| Layer | Role |
-|-------|------|
-| **Solana Program** | Enforces policy rules unconditionally |
-| **Backend (Risk Authority)** | Recommends approve/reject, signs txs |
-| **Funder** | Emergency control (freeze/close) |
-| **Beneficiary** | Can request, cannot extract directly |
+```bash
+cd packages/frontend
+npm run build
+```
 
-**Key invariant**: Even if the backend is compromised, on-chain policy enforcement prevents any payout that violates limits, cooldowns, or risk thresholds.
+### Сборка backend
 
-## License
+```bash
+cd packages/backend
+npm run build
+```
+
+## Сценарий для демо
+
+1. Открыть главную страницу.
+2. Войти в систему.
+3. Подключить кошелек.
+4. Создать vault.
+5. Пополнить vault.
+6. Отправить запрос на расход.
+7. Показать:
+   - оценку AI
+   - проверку правил
+   - итоговое решение
+   - запись решения в Solana
+
+## Что показать жюри
+
+Главная мысль проекта:
+
+Деньги не уходят сразу.
+Сначала система думает, потом проверяет правила, и только после этого разрешает или запрещает выплату.
+
+Что важно подчеркнуть:
+
+- AI участвует в принятии решения
+- backend не верит AI вслепую
+- итог все равно проходит через правила
+- решение доходит до сети Solana
+
+## Какие файлы важны
+
+### Смарт контракт
+
+- `programs/aegis_vault/src/lib.rs`
+
+### Backend
+
+- `packages/backend/src/index.ts`
+- `packages/backend/src/solana/listener.ts`
+- `packages/backend/src/routes/spend-request.ts`
+- `packages/backend/src/ai/evaluateRequest.ts`
+
+### Frontend
+
+- `packages/frontend/src/App.tsx`
+- `packages/frontend/src/pages/Landing.tsx`
+- `packages/frontend/src/pages/CreateVault.tsx`
+- `packages/frontend/src/pages/VaultDetail.tsx`
+
+## Частые проблемы
+
+### Не создается vault
+
+Проверьте:
+
+- подключен ли кошелек
+- хватает ли SOL на создание аккаунтов и пополнение
+- совпадает ли `RISK_AUTHORITY_SECRET_KEY` с backend
+
+### Белый экран
+
+Проверьте:
+
+- создан ли `packages/frontend/.env`
+- правильно ли заполнены данные Firebase
+
+### Запрос висит без решения
+
+Проверьте:
+
+- запущен ли backend
+- отвечает ли `http://localhost:3001/api/health`
+- есть ли SOL у backend ключа на комиссии
+
+## Что не должно попадать в git
+
+В репозиторий не нужно отправлять:
+
+- `.env`
+- локальные базы
+- логи
+- временные файлы
+- ключи
+- локальные сборки
+
+Это уже закрыто в `.gitignore`.
+
+## Лицензия
 
 MIT

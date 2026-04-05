@@ -17,8 +17,16 @@ interface TxResult {
   error?: string;
 }
 
+const VAULT_ACCOUNT_SPACE = 8 + 146;
+const POLICY_ACCOUNT_SPACE = 8 + 58;
+const CREATE_FEE_BUFFER_LAMPORTS = 0.01 * LAMPORTS_PER_SOL;
+
 function toLamports(amountSol: number): BN {
   return new BN(Math.round(amountSol * LAMPORTS_PER_SOL));
+}
+
+function lamportsToSolString(lamports: number) {
+  return (lamports / LAMPORTS_PER_SOL).toFixed(4);
 }
 
 function extractSimulationMessage(
@@ -66,14 +74,34 @@ export function useVaultActions() {
         let signature: string;
 
         if (signTransaction) {
-          const signedTransaction = await signTransaction(transaction);
-          signature = await connection.sendRawTransaction(
-            signedTransaction.serialize(),
-            {
-              preflightCommitment: "confirmed",
-              skipPreflight: false,
+          try {
+            const signedTransaction = await signTransaction(transaction);
+            signature = await connection.sendRawTransaction(
+              signedTransaction.serialize(),
+              {
+                preflightCommitment: "confirmed",
+                skipPreflight: false,
+              }
+            );
+          } catch (walletSignError: any) {
+            const message =
+              typeof walletSignError?.message === "string"
+                ? walletSignError.message
+                : "";
+
+            if (message.includes("User rejected")) {
+              throw walletSignError;
             }
-          );
+
+            if (message.includes("Unexpected error") && sendTransaction) {
+              signature = await sendTransaction(transaction, connection, {
+                preflightCommitment: "confirmed",
+                skipPreflight: false,
+              });
+            } else {
+              throw walletSignError;
+            }
+          }
         } else {
           signature = await sendTransaction(transaction, connection, {
             preflightCommitment: "confirmed",
@@ -115,7 +143,10 @@ export function useVaultActions() {
 
         return {
           success: false,
-          error: err?.message || t("actions.transactionFailed", { label }),
+          error:
+            (typeof err?.message === "string" && err.message.includes("Unexpected error")
+              ? t("actions.walletUnexpectedError")
+              : err?.message) || t("actions.transactionFailed", { label }),
         };
       }
     },
@@ -140,6 +171,29 @@ export function useVaultActions() {
       try {
         const beneficiaryPk = new PublicKey(params.beneficiary);
         const riskAuthorityPk = new PublicKey(params.riskAuthority);
+        const depositLamports = toLamports(params.depositSol);
+
+        const [vaultRentLamports, policyRentLamports, funderBalanceLamports] = await Promise.all([
+          connection.getMinimumBalanceForRentExemption(VAULT_ACCOUNT_SPACE),
+          connection.getMinimumBalanceForRentExemption(POLICY_ACCOUNT_SPACE),
+          connection.getBalance(publicKey, "confirmed"),
+        ]);
+
+        const estimatedRequiredLamports =
+          depositLamports.toNumber() +
+          vaultRentLamports +
+          policyRentLamports +
+          CREATE_FEE_BUFFER_LAMPORTS;
+
+        if (funderBalanceLamports < estimatedRequiredLamports) {
+          return {
+            success: false,
+            error: t("actions.insufficientFundsForCreate", {
+              required: lamportsToSolString(estimatedRequiredLamports),
+              available: lamportsToSolString(funderBalanceLamports),
+            }),
+          };
+        }
 
         // Generate unique vault ID
         const vaultId = new BN(Date.now());
@@ -187,7 +241,7 @@ export function useVaultActions() {
         // Deposit
         if (params.depositSol > 0) {
           const depositTx = await program.methods
-            .deposit(toLamports(params.depositSol))
+            .deposit(depositLamports)
             .accountsPartial({
               funder: publicKey,
               vault: vaultPda,

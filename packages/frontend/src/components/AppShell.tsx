@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import {
   ChevronDownIcon,
   GlobeIcon,
@@ -15,24 +16,22 @@ import { useI18n } from "../i18n";
 import { getLastVaultAddress } from "../utils/lastVault";
 import brandLogoUrl from "../../../../logo/Logo.png";
 import { useAuth } from "../auth/useAuth";
+import { shortWalletAddress } from "../lib/solanaWallets";
 
 interface AppShellProps {
   children: React.ReactNode;
 }
 
-function shortKey(key?: string | null, fallback?: string) {
-  if (!key) return fallback || "";
-  return `${key.slice(0, 4)}...${key.slice(-4)}`;
-}
-
 export default function AppShell({ children }: AppShellProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { connected, publicKey } = useWallet();
+  const { connected, publicKey, wallet, disconnect } = useWallet();
+  const { setVisible } = useWalletModal();
   const { lang, setLanguage, t } = useI18n();
   const { user, signOut } = useAuth();
-  const lastVaultAddress = getLastVaultAddress();
+  const lastVaultAddress = getLastVaultAddress(publicKey?.toBase58()) || getLastVaultAddress();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [walletMenuOpen, setWalletMenuOpen] = useState(false);
 
   const navItems = [
     {
@@ -62,21 +61,28 @@ export default function AppShell({ children }: AppShellProps) {
   const identityTitle = user?.displayName || user?.email || t("auth.account");
   const identitySubtitle =
     user?.providerId === "google.com"
-      ? "Google"
+      ? t("auth.provider.google")
       : user?.providerId === "github.com"
-        ? "GitHub"
+        ? t("auth.provider.github")
         : user?.providerId === "password"
-          ? t("auth.email")
+          ? t("auth.provider.email")
           : t("auth.identityLayer");
   const avatarLabel = useMemo(() => {
     const source = user?.displayName || user?.email || "A";
     return source.slice(0, 1).toUpperCase();
   }, [user?.displayName, user?.email]);
+  const walletProviderIcon = connected ? wallet?.adapter.icon : undefined;
+  const walletProviderName = connected ? wallet?.adapter.name || t("wallet.providerUnknown") : t("shell.walletIdle");
 
   const handleSignOut = async () => {
     setMenuOpen(false);
     await signOut();
     navigate("/");
+  };
+
+  const handleWalletDisconnect = async () => {
+    setWalletMenuOpen(false);
+    await disconnect();
   };
 
   return (
@@ -147,6 +153,79 @@ export default function AppShell({ children }: AppShellProps) {
               <div className="profile-menu-shell">
                 <button
                   type="button"
+                  className={`profile-chip profile-chip-wallet ${walletMenuOpen ? "open" : ""}`}
+                  onClick={() => setWalletMenuOpen((current) => !current)}
+                >
+                  <div className={`profile-chip-avatar ${walletProviderIcon ? "profile-chip-avatar-wallet" : ""}`}>
+                    {walletProviderIcon ? (
+                      <img
+                        src={walletProviderIcon}
+                        alt={walletProviderName}
+                        className="profile-chip-wallet-image"
+                      />
+                    ) : (
+                      <WalletIcon className="icon-svg icon-svg-sm" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="profile-chip-title">
+                      {walletProviderName}
+                    </div>
+                    <div className="profile-chip-subtitle">
+                      {connected
+                        ? shortWalletAddress(publicKey?.toBase58())
+                        : t("wallet.connectToStart")}
+                    </div>
+                  </div>
+                  {connected && <div className="network-badge">{t("wallet.devnetBadge")}</div>}
+                  <ChevronDownIcon className="icon-svg icon-svg-xs" />
+                </button>
+
+                {walletMenuOpen && (
+                  <div className="profile-menu wallet-menu">
+                    <div className="profile-menu-section">
+                      <span className="surface-kicker">{t("wallet.walletLayer")}</span>
+                      <strong>{connected ? t("shell.walletOnline") : t("shell.walletIdle")}</strong>
+                      <p>
+                        {connected
+                          ? `${walletProviderName} · ${shortWalletAddress(publicKey?.toBase58())}`
+                          : t("wallet.connectToStart")}
+                      </p>
+                    </div>
+                    <div className="wallet-menu-meta">
+                      <div className="wallet-menu-row">
+                        <span>{t("wallet.provider")}</span>
+                        <strong>{connected ? walletProviderName : t("common.none")}</strong>
+                      </div>
+                      <div className="wallet-menu-row">
+                        <span>{t("wallet.network")}</span>
+                        <strong>{t("wallet.networkValue")}</strong>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="profile-menu-action"
+                      onClick={() => {
+                        setWalletMenuOpen(false);
+                        setVisible(true);
+                      }}
+                    >
+                      <WalletIcon className="icon-svg icon-svg-sm" />
+                      {connected ? t("wallet.changeWallet") : t("common.connectWallet")}
+                    </button>
+                    {connected && (
+                      <button type="button" className="profile-menu-action" onClick={handleWalletDisconnect}>
+                        <LogOutIcon className="icon-svg icon-svg-sm" />
+                        {t("wallet.disconnect")}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="profile-menu-shell">
+                <button
+                  type="button"
                   className={`profile-chip profile-chip-identity ${menuOpen ? "open" : ""}`}
                   onClick={() => setMenuOpen((current) => !current)}
                 >
@@ -179,23 +258,7 @@ export default function AppShell({ children }: AppShellProps) {
                 )}
               </div>
 
-              <div className="profile-chip">
-                <div className="profile-chip-avatar">
-                  <WalletIcon className="icon-svg icon-svg-sm" />
-                </div>
-                <div>
-                  <div className="profile-chip-title">
-                    {connected ? t("shell.walletOnline") : t("shell.walletIdle")}
-                  </div>
-                  <div className="profile-chip-subtitle">
-                    {connected
-                      ? shortKey(publicKey?.toBase58(), t("shell.walletIdle"))
-                      : t("auth.walletPending")}
-                  </div>
-                </div>
-              </div>
-
-              <WalletActionButton />
+              {!connected && <WalletActionButton />}
             </div>
           </header>
 

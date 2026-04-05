@@ -8,7 +8,10 @@ dist/
 
 # Environment
 .env
+.env.local
+.env.*.local
 packages/backend/.env
+packages/frontend/.env
 packages/backend/*.db
 
 # IDE
@@ -20,6 +23,10 @@ packages/backend/*.db
 # OS
 .DS_Store
 Thumbs.db
+*.log
+*.tmp
+*.tsbuildinfo
+coverage/
 
 # Keypairs (NEVER commit)
 *-keypair.json

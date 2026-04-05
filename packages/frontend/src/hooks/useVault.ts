@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useAegisProgram } from "./useAegisProgram";
+import { useI18n } from "../i18n";
 
 const VAULT_POLL_INTERVAL_MS = 10000;
 
@@ -9,6 +10,18 @@ function isRateLimitError(error: unknown): boolean {
   const message =
     error instanceof Error ? error.message : typeof error === "string" ? error : "";
   return message.includes("429") || message.toLowerCase().includes("too many requests");
+}
+
+function isMissingAccountError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("account does not exist") ||
+    normalized.includes("account not found") ||
+    normalized.includes("failed to get info about account") ||
+    normalized.includes("could not find account")
+  );
 }
 
 async function sleep(ms: number) {
@@ -92,7 +105,8 @@ function parseRequestStatus(status: any): "pending" | "approved" | "rejected" {
 export function useVault(vaultAddress: string | undefined) {
   const program = useAegisProgram();
   const { publicKey } = useWallet();
-  const { connection } = useConnection();
+  useConnection();
+  const { t } = useI18n();
 
   const [vault, setVault] = useState<VaultState | null>(null);
   const [policy, setPolicy] = useState<PolicyState | null>(null);
@@ -186,15 +200,17 @@ export function useVault(vaultAddress: string | undefined) {
       if (!isRateLimitError(err) || !hasLoadedDataRef.current) {
         setError(
           isRateLimitError(err)
-            ? "RPC временно ограничил запросы. Повторяем загрузку..."
-            : err.message
+            ? t("vault.rpcRateLimited")
+            : isMissingAccountError(err)
+              ? t("vault.errorNotFound")
+              : err.message
         );
       }
     } finally {
       fetchInFlightRef.current = false;
       setLoading(false);
     }
-  }, [program, vaultAddress, publicKey]);
+  }, [program, vaultAddress, publicKey, t]);
 
   // Initial fetch + gentle polling
   useEffect(() => {
