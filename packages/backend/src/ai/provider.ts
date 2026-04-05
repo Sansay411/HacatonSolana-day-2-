@@ -9,9 +9,23 @@ export interface AIRequestHistoryItem {
 
 export interface AIVaultPolicy {
   maxPerTx: number;
+  dailyLimit?: number;
   cooldown: number;
   totalLimit: number;
   riskThreshold: number;
+  allowedTimeWindows?: Array<{
+    label: string;
+    startHour: number;
+    endHour: number;
+  }>;
+  categoryRules?: Array<{
+    category: string;
+    label: string;
+    maxAmountSol: number;
+    requiresReview: boolean;
+    enabled: boolean;
+  }>;
+  vaultModePreset?: "startup" | "grant" | "freelancer";
 }
 
 export interface AIFlags {
@@ -34,6 +48,8 @@ export interface AIParsedOutput {
   decision: AIDecision;
   reasons: string[];
   flags: AIFlags;
+  category?: string;
+  behavioral_patterns?: string[];
 }
 
 export interface AIProviderResult {
@@ -42,6 +58,8 @@ export interface AIProviderResult {
   riskScore: number;
   reasons: string[];
   flags: AIFlags;
+  category: string | null;
+  behavioralPatterns: string[];
   inputPayload: string;
   sanitizedPurpose: string;
   rawResponse: string;
@@ -69,6 +87,21 @@ export function sanitizeReasons(reasons: unknown): string[] {
     .slice(0, 4);
 
   return normalized.length > 0 ? normalized : ["No structured reasoning provided"];
+}
+
+export function sanitizeCategory(value: unknown) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase().slice(0, 40);
+  return normalized || null;
+}
+
+export function sanitizePatterns(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean)
+    .map((item) => item.slice(0, 120))
+    .slice(0, 5);
 }
 
 export function summarizeReasons(reasons: string[]) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useAegisProgram } from "./useAegisProgram";
@@ -113,7 +113,7 @@ export function useVault(vaultAddress: string | undefined) {
   const [requests, setRequests] = useState<SpendRequestState[]>([]);
   const [role, setRole] = useState<UserRole>("none");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<{ key?: string; message?: string } | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchInFlightRef = useRef(false);
@@ -194,16 +194,16 @@ export function useVault(vaultAddress: string | undefined) {
 
       setRequests(parsed);
       hasLoadedDataRef.current = true;
-      setError(null);
+      setErrorState(null);
     } catch (err: any) {
       console.error("Vault fetch error:", err);
       if (!isRateLimitError(err) || !hasLoadedDataRef.current) {
-        setError(
+        setErrorState(
           isRateLimitError(err)
-            ? t("vault.rpcRateLimited")
+            ? { key: "vault.rpcRateLimited" }
             : isMissingAccountError(err)
-              ? t("vault.errorNotFound")
-              : err.message
+              ? { key: "vault.errorNotFound" }
+              : { key: "vault.errorGeneric", message: err?.message }
         );
       }
     } finally {
@@ -211,6 +211,14 @@ export function useVault(vaultAddress: string | undefined) {
       setLoading(false);
     }
   }, [program, vaultAddress, publicKey, t]);
+
+  const error = useMemo(() => {
+    if (!errorState) return null;
+    if (errorState.key) {
+      return t(errorState.key);
+    }
+    return errorState.message || null;
+  }, [errorState, t]);
 
   // Initial fetch + gentle polling
   useEffect(() => {

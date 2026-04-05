@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {
+  AlertCircleIcon,
   CheckCircleIcon,
   GlobeIcon,
   GridIcon,
@@ -14,65 +15,102 @@ import brandLogoUrl from "../../../../logo/Logo.png";
 import AuthPanel from "../auth/AuthPanel";
 import { useAuth } from "../auth/useAuth";
 import WalletActionButton from "../components/WalletActionButton";
-import { SOLANA_NETWORK_LABEL } from "../lib/solanaWallets";
+import { SOLANA_NETWORK_LABEL, shortWalletAddress } from "../lib/solanaWallets";
+import { getLastVaultAddress } from "../utils/lastVault";
+import { useVaultCatalog } from "../hooks/useVaultCatalog";
 
 export default function Landing() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { connected } = useWallet();
+  const { connected, connecting, publicKey } = useWallet();
   const { lang, setLanguage, t } = useI18n();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, loading: authLoading } = useAuth();
+  const { items: vaultItems, loading: vaultsLoading, error: vaultsError, refetch } = useVaultCatalog();
+
+  const authProviderLabel =
+    user?.providerId === "google.com"
+      ? t("auth.provider.google")
+      : user?.providerId === "github.com"
+        ? t("auth.provider.github")
+        : user?.providerId === "password"
+          ? t("auth.provider.email")
+          : t("common.notAvailable");
+
+  const getVaultModeLabel = (mode: "startup" | "grant" | "freelancer") => {
+    if (mode === "grant") return t("vaultMode.grant");
+    if (mode === "freelancer") return t("vaultMode.freelancer");
+    return t("vaultMode.startup");
+  };
 
   const nextRoute = searchParams.get("next") || "/console";
+  const lastVaultAddress =
+    getLastVaultAddress(publicKey?.toBase58()) ||
+    getLastVaultAddress() ||
+    vaultItems[0]?.vaultAddress ||
+    null;
 
   const heroStats = useMemo(
     () => [
-      { label: t("landing.stats.security"), value: "24/7" },
-      { label: t("landing.stats.ai"), value: "<3s" },
-      { label: t("landing.stats.control"), value: "100%" },
+      { label: t("landing.resume.connectedWallet"), value: connected ? "1" : "0" },
+      { label: t("landing.resume.knownVaults"), value: String(vaultItems.length) },
+      { label: t("landing.stats.control"), value: t("landing.stats.controlValue") },
+    ],
+    [connected, t, vaultItems.length]
+  );
+
+  const howSteps = useMemo(
+    () => [
+      { step: "01", title: t("landing.how.twoTitle"), text: t("landing.how.twoText") },
+      { step: "02", title: t("landing.how.threeTitle"), text: t("landing.how.threeText") },
+      { step: "03", title: t("landing.features.ai.title"), text: t("landing.security.policy.text") },
+      { step: "04", title: t("landing.how.fourTitle"), text: t("landing.security.chain.text") },
     ],
     [t]
   );
 
-  const features = useMemo(
+  const useCases = useMemo(
     () => [
       {
-        icon: SparklesIcon,
-        kicker: t("landing.features.ai.kicker"),
-        title: t("landing.features.ai.title"),
-        text: t("landing.features.ai.text"),
+        title: t("landing.useCases.startup.title"),
+        text: t("landing.useCases.startup.text"),
+        why: t("landing.useCases.startup.why"),
       },
       {
-        icon: WalletIcon,
-        kicker: t("landing.features.chain.kicker"),
-        title: t("landing.features.chain.title"),
-        text: t("landing.features.chain.text"),
+        title: t("landing.useCases.grants.title"),
+        text: t("landing.useCases.grants.text"),
+        why: t("landing.useCases.grants.why"),
       },
       {
-        icon: ShieldIcon,
-        kicker: t("landing.features.policy.kicker"),
-        title: t("landing.features.policy.title"),
-        text: t("landing.features.policy.text"),
+        title: t("landing.useCases.dao.title"),
+        text: t("landing.useCases.dao.text"),
+        why: t("landing.useCases.dao.why"),
+      },
+      {
+        title: t("landing.useCases.freelancer.title"),
+        text: t("landing.useCases.freelancer.text"),
+        why: t("landing.useCases.freelancer.why"),
       },
     ],
     [t]
   );
 
-  const howItWorks = useMemo(
+  const securityBlocks = useMemo(
     () => [
-      { step: "01", title: t("landing.how.oneTitle"), text: t("landing.how.oneText") },
-      { step: "02", title: t("landing.how.twoTitle"), text: t("landing.how.twoText") },
-      { step: "03", title: t("landing.how.threeTitle"), text: t("landing.how.threeText") },
-      { step: "04", title: t("landing.how.fourTitle"), text: t("landing.how.fourText") },
+      { title: t("landing.security.ai.title"), text: t("landing.security.ai.text") },
+      { title: t("landing.security.backend.title"), text: t("landing.security.backend.text") },
+      { title: t("landing.security.policy.title"), text: t("landing.security.policy.text") },
+      { title: t("landing.security.safe.title"), text: t("landing.security.safe.text") },
+      { title: t("landing.security.chain.title"), text: t("landing.security.chain.text") },
     ],
     [t]
   );
 
-  const trustBlocks = useMemo(
+  const systemProperties = useMemo(
     () => [
-      { title: t("landing.trust.oneTitle"), text: t("landing.trust.oneText") },
-      { title: t("landing.trust.twoTitle"), text: t("landing.trust.twoText") },
-      { title: t("landing.trust.threeTitle"), text: t("landing.trust.threeText") },
+      t("landing.properties.deterministic"),
+      t("landing.properties.ai"),
+      t("landing.properties.failSafe"),
+      t("landing.properties.audit"),
     ],
     [t]
   );
@@ -86,6 +124,12 @@ export default function Landing() {
       scrollToSection("landing-auth");
       return;
     }
+
+    if (connected && lastVaultAddress) {
+      navigate(`/vault/${lastVaultAddress}`);
+      return;
+    }
+
     navigate(nextRoute);
   };
 
@@ -106,7 +150,7 @@ export default function Landing() {
               <img src={brandLogoUrl} alt="Aegis logo" className="brand-mark-image" />
             </span>
             <span className="marketing-brand-copy">
-              <strong>Aegis</strong>
+              <strong>{t("landing.productName")}</strong>
               <em>{t("landing.brandSubtitle")}</em>
             </span>
           </button>
@@ -144,30 +188,33 @@ export default function Landing() {
 
             <button type="button" className="btn btn-primary" onClick={goToProduct}>
               <SparklesIcon className="icon-svg icon-svg-sm" />
-              {isAuthenticated ? t("landing.cta.console") : t("landing.cta.getStarted")}
+              {connected ? t("landing.cta.console") : t("landing.cta.getStarted")}
             </button>
           </div>
         </header>
 
         <section className="marketing-hero marketing-hero-auth">
           <div className="hero-copy-panel marketing-hero-copy">
-            <div className="eyebrow-pill">{t("landing.eyebrow")}</div>
-            <h1 className="hero-display">{t("landing.title")}</h1>
-            <p className="hero-paragraph">{t("landing.description")}</p>
+            <div className="eyebrow-pill">{t("landing.productName")}</div>
+            <h1 className="hero-display">{t("landing.tagline")}</h1>
+            <p className="hero-paragraph">{t("landing.heroExplanation")}</p>
 
             <div className="hero-action-row">
               <button type="button" className="btn btn-primary btn-xl" onClick={goToProduct}>
                 <SparklesIcon className="icon-svg icon-svg-sm" />
-                {isAuthenticated ? t("landing.cta.console") : t("landing.cta.getStarted")}
+                {connected ? t("landing.cta.console") : t("landing.cta.getStarted")}
               </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-xl"
-                onClick={() => scrollToSection("landing-how")}
-              >
-                <GridIcon className="icon-svg icon-svg-sm" />
-                {t("landing.cta.learn")}
-              </button>
+              {connected ? (
+                <Link
+                  to={lastVaultAddress ? `/vault/${lastVaultAddress}` : "/console"}
+                  className="btn btn-secondary btn-xl"
+                >
+                  <GridIcon className="icon-svg icon-svg-sm" />
+                  {t("landing.resume.open")}
+                </Link>
+              ) : (
+                <WalletActionButton className="btn-secondary btn-xl" />
+              )}
             </div>
 
             <div className="hero-stat-row">
@@ -181,18 +228,20 @@ export default function Landing() {
 
             <div className="landing-next-step-strip">
               <div className="landing-next-step-card">
-                <span className="surface-kicker">{t("landing.identityLayer")}</span>
-                <strong>
-                  {isAuthenticated
-                    ? user?.displayName || user?.email || t("auth.account")
-                    : t("landing.identityPending")}
-                </strong>
-                <p>{t("landing.identityText")}</p>
+                <span className="surface-kicker">{t("landing.resumeKicker")}</span>
+                <strong>{t("landing.resumeTitle")}</strong>
+                <p>{t("landing.resumeText")}</p>
               </div>
               <div className="landing-next-step-card">
-                <span className="surface-kicker">{t("landing.walletLayer")}</span>
-                <strong>{connected ? t("shell.walletOnline") : t("auth.walletPending")}</strong>
-                <p>{t("landing.walletText")}</p>
+                <span className="surface-kicker">{t("landing.resume.lastVault")}</span>
+                <strong>
+                  {lastVaultAddress ? shortWalletAddress(lastVaultAddress) : t("common.none")}
+                </strong>
+                <p>
+                  {connected
+                    ? `${t("landing.resume.connectedWallet")}: ${shortWalletAddress(publicKey?.toBase58())}`
+                    : t("wallet.connectAfterAuthHint")}
+                </p>
               </div>
             </div>
           </div>
@@ -204,6 +253,7 @@ export default function Landing() {
                   <span className="surface-kicker">{t("auth.accountReady")}</span>
                   <span className="status-pill status-pill-success">{t("auth.signedIn")}</span>
                 </div>
+
                 <div className="auth-copy">
                   <h2>{user?.displayName || user?.email || t("auth.account")}</h2>
                   <p>{t("landing.authenticatedCopy")}</p>
@@ -212,7 +262,7 @@ export default function Landing() {
                 <div className="auth-state-stack">
                   <div className="auth-state-row">
                     <span>{t("auth.identityLayer")}</span>
-                    <strong>{user?.providerId || t("common.notAvailable")}</strong>
+                    <strong>{authProviderLabel}</strong>
                   </div>
                   <div className="auth-state-row">
                     <span>{t("auth.walletLayer")}</span>
@@ -221,6 +271,10 @@ export default function Landing() {
                   <div className="auth-state-row">
                     <span>{t("wallet.network")}</span>
                     <strong>{SOLANA_NETWORK_LABEL}</strong>
+                  </div>
+                  <div className="auth-state-row">
+                    <span>{t("landing.resume.knownVaults")}</span>
+                    <strong>{vaultItems.length}</strong>
                   </div>
                 </div>
 
@@ -231,7 +285,45 @@ export default function Landing() {
                   </button>
                   <WalletActionButton className="btn-secondary" />
                 </div>
+
                 {!connected && <p className="auth-wallet-hint">{t("wallet.connectAfterAuthHint")}</p>}
+
+                <div className="landing-catalog-panel">
+                  <span className="surface-kicker">{t("landing.resumeKicker")}</span>
+                  {authLoading || connecting ? (
+                    <p className="muted-copy">{t("landing.resume.rehydrating")}</p>
+                  ) : vaultsLoading ? (
+                    <p className="muted-copy">{t("landing.resume.loading")}</p>
+                  ) : vaultsError ? (
+                    <div className="landing-empty-state">
+                      <p className="muted-copy">{t("landing.resume.error")}</p>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={refetch}>
+                        <AlertCircleIcon className="icon-svg icon-svg-sm" />
+                        {t("common.retry")}
+                      </button>
+                    </div>
+                  ) : vaultItems.length ? (
+                    <div className="landing-catalog-list">
+                      {vaultItems.slice(0, 3).map((item) => (
+                        <Link key={item.vaultAddress} to={`/vault/${item.vaultAddress}`} className="landing-catalog-item">
+                          <div>
+                            <strong>{item.name || shortWalletAddress(item.vaultAddress, item.vaultAddress)}</strong>
+                            <span>{getVaultModeLabel(item.mode)}</span>
+                          </div>
+                          <em>{item.analytics.totalRequests}</em>
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="landing-empty-state">
+                      <p className="muted-copy">{t("landing.resume.empty")}</p>
+                      <Link to="/create" className="btn btn-secondary btn-sm">
+                        <ShieldIcon className="icon-svg icon-svg-sm" />
+                        {t("landing.cta.console")}
+                      </Link>
+                    </div>
+                  )}
+                </div>
               </section>
             ) : (
               <AuthPanel onAuthenticated={() => navigate(nextRoute)} />
@@ -241,37 +333,13 @@ export default function Landing() {
 
         <section id="landing-features" className="marketing-section">
           <div className="section-heading">
-            <span className="surface-kicker">{t("landing.featuresKicker")}</span>
-            <h2>{t("landing.featuresTitle")}</h2>
-            <p>{t("landing.featuresText")}</p>
-          </div>
-
-          <div className="marketing-feature-grid">
-            {features.map((feature) => {
-              const Icon = feature.icon;
-              return (
-                <article key={feature.title} className="surface-card feature-surface">
-                  <div className="feature-icon-badge">
-                    <Icon className="icon-svg icon-svg-sm" />
-                  </div>
-                  <span className="surface-kicker">{feature.kicker}</span>
-                  <h3>{feature.title}</h3>
-                  <p>{feature.text}</p>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-
-        <section id="landing-how" className="marketing-section">
-          <div className="section-heading">
             <span className="surface-kicker">{t("landing.howKicker")}</span>
             <h2>{t("landing.howTitle")}</h2>
             <p>{t("landing.howText")}</p>
           </div>
 
           <div className="how-grid">
-            {howItWorks.map((item) => (
+            {howSteps.map((item) => (
               <article key={item.step} className="surface-card how-card">
                 <span className="how-step">{item.step}</span>
                 <h3>{item.title}</h3>
@@ -281,24 +349,119 @@ export default function Landing() {
           </div>
         </section>
 
+        <section id="landing-how" className="marketing-section">
+          <div className="section-heading">
+            <span className="surface-kicker">{t("landing.useCasesKicker")}</span>
+            <h2>{t("landing.useCasesTitle")}</h2>
+            <p>{t("landing.useCasesText")}</p>
+          </div>
+
+          <div className="marketing-feature-grid">
+            {useCases.map((item) => (
+              <article key={item.title} className="surface-card feature-surface use-case-card">
+                <span className="surface-kicker">{t("landing.useCasesKicker")}</span>
+                <h3>{item.title}</h3>
+                <p>{item.text}</p>
+                <div className="use-case-why">
+                  <CheckCircleIcon className="icon-svg icon-svg-sm" />
+                  <span>{item.why}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="marketing-section">
+          <div className="surface-card landing-compare-grid">
+            <div className="section-heading section-heading-tight">
+              <span className="surface-kicker">{t("landing.whyKicker")}</span>
+              <h2>{t("landing.whyTitle")}</h2>
+              <p>{t("landing.whyText")}</p>
+            </div>
+
+            <div className="landing-compare-cards">
+              <article className="surface-card feature-surface feature-surface-soft">
+                <span className="surface-kicker">{t("landing.problemTitle")}</span>
+                <ul className="landing-bullet-list">
+                  <li>{t("landing.problem.one")}</li>
+                  <li>{t("landing.problem.two")}</li>
+                  <li>{t("landing.problem.three")}</li>
+                </ul>
+              </article>
+
+              <article className="surface-card feature-surface feature-surface-dark">
+                <span className="surface-kicker">{t("landing.solutionTitle")}</span>
+                <ul className="landing-bullet-list">
+                  <li>{t("landing.solution.one")}</li>
+                  <li>{t("landing.solution.two")}</li>
+                  <li>{t("landing.solution.three")}</li>
+                </ul>
+              </article>
+            </div>
+          </div>
+        </section>
+
         <section id="landing-security" className="marketing-section">
           <div className="surface-card trust-section">
             <div className="section-heading section-heading-tight">
-              <span className="surface-kicker">{t("landing.trustKicker")}</span>
-              <h2>{t("landing.trustTitle")}</h2>
-              <p>{t("landing.trustText")}</p>
+              <span className="surface-kicker">{t("landing.securityLead")}</span>
+              <h2>{t("landing.securityLeadTitle")}</h2>
+              <p>{t("landing.securityLeadText")}</p>
             </div>
 
-            <div className="trust-grid">
-              {trustBlocks.map((item) => (
+            <div className="trust-grid trust-grid-extended">
+              {securityBlocks.map((item) => (
                 <article key={item.title} className="trust-card">
-                  <CheckCircleIcon className="icon-svg icon-svg-sm" />
+                  <ShieldIcon className="icon-svg icon-svg-sm" />
                   <div>
                     <h3>{item.title}</h3>
                     <p>{item.text}</p>
                   </div>
                 </article>
               ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="marketing-section">
+          <div className="section-heading">
+            <span className="surface-kicker">{t("landing.propertiesKicker")}</span>
+            <h2>{t("landing.propertiesTitle")}</h2>
+          </div>
+
+          <div className="marketing-feature-grid landing-properties-grid">
+            {systemProperties.map((item) => (
+              <article key={item} className="surface-card feature-surface feature-surface-soft">
+                <div className="feature-icon-badge">
+                  <SparklesIcon className="icon-svg icon-svg-sm" />
+                </div>
+                <h3>{item}</h3>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="marketing-section">
+          <div className="surface-card landing-final-cta">
+            <div>
+              <span className="surface-kicker">{t("landing.productName")}</span>
+              <h2>{t("landing.finalTitle")}</h2>
+              <p>{t("landing.finalText")}</p>
+            </div>
+
+            <div className="hero-action-row">
+              <button type="button" className="btn btn-primary btn-xl" onClick={goToProduct}>
+                <SparklesIcon className="icon-svg icon-svg-sm" />
+                {t("landing.finalPrimary")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-xl"
+                onClick={() => scrollToSection("landing-security")}
+              >
+                <AlertCircleIcon className="icon-svg icon-svg-sm" />
+                {t("landing.finalSecondary")}
+              </button>
             </div>
           </div>
         </section>

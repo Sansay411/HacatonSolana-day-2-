@@ -16,6 +16,7 @@ import {
   saveRiskEvaluation,
   updateSpendRequestProcessing,
 } from "../db/queries";
+import { registerApprovedPayoutMonitoring } from "../monitoring/service";
 
 const processedRequests = new Set<string>();
 const evaluationRateLimit = new Map<string, { count: number; resetAt: number }>();
@@ -52,6 +53,7 @@ interface InternalDecision {
   decision: AIDecision;
   riskScore: number;
   reasons: string[];
+  behavioralPatterns: string[];
   flags: AIFlags;
   sanitizedPurpose?: string;
   inputPayload: string;
@@ -83,7 +85,10 @@ function sanitizeAiFindings(reasons: string[]) {
     /rejected by hard policy/i,
     /hard policy/i,
     /cooldown policy/i,
+    /cooldown period/i,
+    /within the cooldown/i,
     /per-transaction limit/i,
+    /daily limit/i,
     /total vault limit/i,
     /current vault balance/i,
     /risk score exceeds threshold/i,
@@ -354,6 +359,7 @@ function buildUnavailableDecision(
     decision: "reject",
     riskScore: 100,
     reasons: buildFallbackReasons(context),
+    behavioralPatterns: [],
     flags: {
       high_velocity: true,
       suspicious_pattern: true,
@@ -461,6 +467,7 @@ async function evaluateWithAI(
         "High frequency behavior detected.",
         "Safety fallback activated.",
       ]),
+      behavioralPatterns: [],
       flags: {
         high_velocity: true,
         suspicious_pattern: true,
@@ -503,6 +510,7 @@ async function evaluateWithAI(
       decision: result.decision,
       riskScore: result.riskScore,
       reasons: result.reasons,
+      behavioralPatterns: result.behavioralPatterns,
       flags: result.flags,
       sanitizedPurpose: result.sanitizedPurpose,
       inputPayload: result.inputPayload,
@@ -553,7 +561,9 @@ export async function processSpendRequest(params: {
   const hardPolicy = validateHardPolicy(context, aiDecision);
   const policyChecks = buildPolicyChecks(context);
   const aiAvailable = aiDecision.source !== "fallback";
-  const aiFindings = aiAvailable ? sanitizeAiFindings(aiDecision.reasons) : [];
+  const aiFindingSource =
+    aiDecision.behavioralPatterns.length > 0 ? aiDecision.behavioralPatterns : aiDecision.reasons;
+  const aiFindings = aiAvailable ? sanitizeAiFindings(aiFindingSource) : [];
 
   const finalDecision: "approved" | "rejected" =
     !hardPolicy.allowed || aiDecision.decision === "reject" ? "rejected" : "approved";
@@ -602,6 +612,17 @@ export async function processSpendRequest(params: {
   const payoutExecutedOnChain = finalDecision === "approved" && Boolean(txSignature);
   const executedOnChain = Boolean(txSignature);
 
+  if (finalDecision === "approved" && txSignature) {
+    await registerApprovedPayoutMonitoring({
+      vaultPubkey: params.vaultPubkey,
+      walletPubkey: context.spendRequest.beneficiary.toBase58(),
+      requestPubkey: params.requestPubkey,
+      payoutAmountLamports: context.spendRequest.amount.toNumber(),
+      payoutTxSignature: txSignature,
+      payoutTimestamp: Math.floor(Date.now() / 1000),
+    });
+  }
+
   const auditPayload = {
     inputPayload: aiDecision.inputPayload,
     sanitizedPurpose: aiDecision.sanitizedPurpose || params.purpose,
@@ -612,6 +633,7 @@ export async function processSpendRequest(params: {
     aiRiskSource: aiAvailable ? "gemini" : "fallback_engine",
     operatingMode: aiAvailable ? "standard" : "safe_mode",
     aiFindings,
+    behavioralPatterns: aiDecision.behavioralPatterns,
     providerDecision: aiDecision.decision,
     providerRiskScore: aiDecision.riskScore,
     providerReasons: aiDecision.reasons,

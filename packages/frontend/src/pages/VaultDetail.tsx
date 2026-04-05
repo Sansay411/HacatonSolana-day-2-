@@ -13,9 +13,11 @@ import {
 } from "../components/Icons";
 import { useVault, type SpendRequestState } from "../hooks/useVault";
 import { useVaultActions } from "../hooks/useVaultActions";
+import { useVaultWallets, useWalletChronology } from "../hooks/useWalletChronology";
 import { useI18n } from "../i18n";
 import { apiFetch } from "../lib/api";
 import { setLastVaultAddress } from "../utils/lastVault";
+import type { WalletChronologyEvent } from "../../../shared/src/api-types";
 
 interface SpendRequestApiDetail {
   requestAddress: string;
@@ -96,6 +98,24 @@ function formatAbsoluteTime(unixSeconds: number, locale: string, fallback: strin
   return new Date(unixSeconds * 1000).toLocaleString(locale);
 }
 
+function monitoringStorageKey(kind: "tab" | "wallet", vaultAddress?: string) {
+  return vaultAddress ? `aegis-vault-${kind}:${vaultAddress}` : null;
+}
+
+function readStoredMonitoringValue(kind: "tab" | "wallet", vaultAddress?: string) {
+  if (typeof window === "undefined") return null;
+  const key = monitoringStorageKey(kind, vaultAddress);
+  if (!key) return null;
+  return window.localStorage.getItem(key);
+}
+
+function writeStoredMonitoringValue(kind: "tab" | "wallet", vaultAddress: string | undefined, value: string) {
+  if (typeof window === "undefined" || !vaultAddress) return;
+  const key = monitoringStorageKey(kind, vaultAddress);
+  if (!key) return;
+  window.localStorage.setItem(key, value);
+}
+
 function dedupeList(items: Array<string | null | undefined>) {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -110,6 +130,56 @@ function dedupeList(items: Array<string | null | undefined>) {
   }
 
   return result;
+}
+
+function formatAiProviderName(provider?: string | null) {
+  if (!provider) return "Gemini";
+  const normalized = provider.trim().toLowerCase();
+  if (normalized === "gemini") return "Gemini";
+  return provider;
+}
+
+function getMonitoringLevelLabel(
+  level: "stable" | "warning" | "high_risk",
+  t: (key: string) => string
+) {
+  if (level === "stable") return t("vault.monitoring.level.stable");
+  if (level === "high_risk") return t("vault.monitoring.level.highRisk");
+  return t("vault.monitoring.level.warning");
+}
+
+function getMonitoringStatusLabel(
+  status: "idle" | "active" | "completed",
+  t: (key: string) => string
+) {
+  if (status === "active") return t("vault.monitoring.status.active");
+  if (status === "completed") return t("vault.monitoring.status.completed");
+  return t("vault.monitoring.status.idle");
+}
+
+function getMonitoringEventLabel(eventType: string, t: (key: string) => string) {
+  switch (eventType) {
+    case "payout_received":
+      return t("vault.monitoring.event.payout_received");
+    case "monitoring_activated":
+      return t("vault.monitoring.event.monitoring_activated");
+    case "first_outgoing_detected":
+      return t("vault.monitoring.event.first_outgoing_detected");
+    case "rapid_movement_detected":
+      return t("vault.monitoring.event.rapid_movement_detected");
+    case "funds_moved":
+      return t("vault.monitoring.event.funds_moved");
+    case "trust_score_increased":
+      return t("vault.monitoring.event.trust_score_increased");
+    case "trust_score_decreased":
+      return t("vault.monitoring.event.trust_score_decreased");
+    case "trust_score_updated":
+      return t("vault.monitoring.event.trust_score_updated");
+    case "monitoring_completed":
+      return t("vault.monitoring.event.monitoring_completed");
+    default:
+      return t("vault.monitoring.event.unknown");
+  }
 }
 
 function useAnimatedValue(target: number, duration = 700) {
@@ -430,8 +500,8 @@ function RequestCard({
         <section className="request-section-block">
           <div className="request-section-head">
             <strong>{t("vault.section.aiEvaluation")}</strong>
-            <div className="request-ai-strip">
-              <span className="status-pill status-pill-muted">{`${t("vault.aiProvider")}: ${detail?.aiEvaluation?.provider || "Gemini"}`}</span>
+              <div className="request-ai-strip">
+              <span className="status-pill status-pill-muted">{`${t("vault.aiProvider")}: ${formatAiProviderName(detail?.aiEvaluation?.provider)}`}</span>
               <span className="status-pill status-pill-muted">{`${t("vault.aiStatus")}: ${aiStatusLabel}`}</span>
               {aiStatus === "available" ? (
                 <span className="status-pill status-pill-muted">{`${t("vault.aiRecommendation")}: ${aiRecommendationLabel}`}</span>
@@ -455,7 +525,6 @@ function RequestCard({
                 thresholdLabel={t("vault.thresholdLabel")}
               />
               <div className="request-ai-strip">
-                <span className={`status-pill status-pill-${level.className}`}>{`${t("vault.aiRiskLevel")}: ${level.label}`}</span>
                 <span className="status-pill status-pill-muted">{`${t("vault.aiConfidence")}: ${aiConfidenceLabel}`}</span>
                 {detail?.aiEvaluation?.flags?.high_velocity && (
                   <span className="status-pill status-pill-warning">{t("vault.flagVelocity")}</span>
@@ -483,7 +552,13 @@ function RequestCard({
               </ul>
             ) : (
               <p className="request-section-empty">
-                {aiStatus === "unavailable" ? t("vault.emptyDash") : req.status === "pending" ? t("vault.aiPending") : t("vault.notApplicable")}
+                {aiStatus === "unavailable"
+                  ? t("vault.emptyDash")
+                  : req.status === "pending"
+                    ? t("vault.aiPending")
+                    : aiStatus === "available"
+                      ? t("vault.aiFindingsNormal")
+                      : t("vault.notApplicable")}
               </p>
             )}
           </div>
@@ -603,6 +678,216 @@ function RequestCard({
   );
 }
 
+function MonitoringPanel({
+  vaultAddress,
+  beneficiaryAddress,
+}: {
+  vaultAddress?: string;
+  beneficiaryAddress?: string;
+}) {
+  const { t, locale } = useI18n();
+  const { items: wallets, loading: walletsLoading, error: walletsError } = useVaultWallets(vaultAddress);
+  const [selectedWallet, setSelectedWallet] = useState<string | null>(() => readStoredMonitoringValue("wallet", vaultAddress));
+
+  useEffect(() => {
+    const stored = readStoredMonitoringValue("wallet", vaultAddress);
+    if (stored) {
+      setSelectedWallet(stored);
+      return;
+    }
+    setSelectedWallet(null);
+  }, [vaultAddress]);
+
+  useEffect(() => {
+    if (!wallets.length) {
+      if (beneficiaryAddress) {
+        setSelectedWallet((current) => current || beneficiaryAddress);
+      }
+      return;
+    }
+
+    const preferred =
+      wallets.find((item) => item.walletAddress === selectedWallet)?.walletAddress ||
+      wallets.find((item) => item.walletAddress === beneficiaryAddress)?.walletAddress ||
+      wallets[0]?.walletAddress ||
+      null;
+
+    if (preferred && preferred !== selectedWallet) {
+      setSelectedWallet(preferred);
+      writeStoredMonitoringValue("wallet", vaultAddress, preferred);
+    }
+  }, [beneficiaryAddress, selectedWallet, vaultAddress, wallets]);
+
+  const activeWallet = selectedWallet || beneficiaryAddress || wallets[0]?.walletAddress;
+  const { data, loading, error, refetch } = useWalletChronology(vaultAddress, activeWallet);
+
+  const selectedWalletSummary =
+    wallets.find((item) => item.walletAddress === activeWallet) ||
+    (beneficiaryAddress
+      ? {
+          walletAddress: beneficiaryAddress,
+          trackedPayouts: 0,
+          lastPayoutTimestamp: null,
+          lastUpdatedAt: null,
+          trustScore: 50,
+          trustLevel: "warning" as const,
+          protectedAmountLamports: 0,
+        }
+      : null);
+
+  return (
+    <div className="monitoring-stack">
+      <div className="surface-card monitoring-hero-card">
+        <div className="panel-topline">
+          <div>
+            <span className="surface-kicker">{t("vault.monitoring.kicker")}</span>
+            <h2>{t("vault.monitoring.title")}</h2>
+          </div>
+          <span className="status-pill status-pill-muted">{getMonitoringStatusLabel(data?.monitoring.status || "idle", t)}</span>
+        </div>
+        <p className="page-subtitle">{t("vault.monitoring.subtitle")}</p>
+
+        <div className="monitoring-wallet-row">
+          <label className="field-label" htmlFor="monitoring-wallet-select">{t("vault.monitoring.wallet")}</label>
+          <select
+            id="monitoring-wallet-select"
+            className="premium-select"
+            value={activeWallet || ""}
+            onChange={(event) => {
+              setSelectedWallet(event.target.value);
+              writeStoredMonitoringValue("wallet", vaultAddress, event.target.value);
+            }}
+            disabled={walletsLoading || wallets.length <= 1}
+          >
+            {(wallets.length ? wallets : selectedWalletSummary ? [selectedWalletSummary] : []).map((item) => (
+              <option key={item.walletAddress} value={item.walletAddress}>
+                {shortKey(item.walletAddress)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {walletsLoading ? (
+        <div className="surface-card empty-state-panel">
+          <span className="surface-kicker">{t("vault.monitoring.kicker")}</span>
+          <h3>{t("vault.monitoring.loading")}</h3>
+        </div>
+      ) : walletsError ? (
+        <div className="surface-card empty-state-panel">
+          <span className="surface-kicker">{t("vault.monitoring.kicker")}</span>
+          <h3>{t("vault.monitoring.error")}</h3>
+        </div>
+      ) : !activeWallet ? (
+        <div className="surface-card empty-state-panel">
+          <span className="surface-kicker">{t("vault.monitoring.kicker")}</span>
+          <h3>{t("vault.monitoring.walletEmpty")}</h3>
+        </div>
+      ) : loading ? (
+        <div className="surface-card empty-state-panel">
+          <span className="surface-kicker">{t("vault.monitoring.kicker")}</span>
+          <h3>{t("vault.monitoring.loading")}</h3>
+        </div>
+      ) : error ? (
+        <div className="surface-card empty-state-panel">
+          <span className="surface-kicker">{t("vault.monitoring.kicker")}</span>
+          <h3>{t("vault.monitoring.error")}</h3>
+          <button type="button" className="btn btn-secondary" onClick={refetch}>
+            <ArrowDownCircleIcon className="icon-svg icon-svg-sm" />
+            {t("vault.monitoring.retry")}
+          </button>
+        </div>
+      ) : data?.monitoring.trackedPayouts === 0 ? (
+        <div className="surface-card empty-state-panel">
+          <span className="surface-kicker">{t("vault.monitoring.kicker")}</span>
+          <h3>{t("vault.monitoring.empty")}</h3>
+        </div>
+      ) : (
+        <>
+          <section className="vault-command-ribbon monitoring-ribbon">
+            <div className="surface-card command-ribbon-card command-ribbon-card-dark command-ribbon-card-ai">
+              <span className="surface-kicker">{t("vault.monitoring.trust")}</span>
+              <strong>{`${data?.trust.score ?? 50}/100`}</strong>
+              <p>{getMonitoringLevelLabel(data?.trust.level || "warning", t)}</p>
+            </div>
+            <div className="surface-card command-ribbon-card">
+              <span className="surface-kicker">{t("vault.monitoring.status")}</span>
+              <strong>{getMonitoringStatusLabel(data?.monitoring.status || "idle", t)}</strong>
+              <p>{data?.monitoring.summary}</p>
+            </div>
+            <div className="surface-card command-ribbon-card command-ribbon-card-accent">
+              <span className="surface-kicker">{t("vault.monitoring.totalPayouts")}</span>
+              <strong>{`${((data?.monitoring.totalPayoutAmountLamports || 0) / 1_000_000_000).toFixed(2)} SOL`}</strong>
+              <p>{`${t("vault.monitoring.trackedPayouts")}: ${data?.monitoring.trackedPayouts || 0}`}</p>
+            </div>
+          </section>
+
+          <div className="surface-card request-timeline-shell">
+            <div className="panel-topline">
+              <div>
+                <span className="surface-kicker">{t("vault.monitoring.timeline")}</span>
+                <h2>{shortKey(activeWallet)}</h2>
+              </div>
+              <span className="status-pill status-pill-muted">
+                {data?.events.length || 0}
+              </span>
+            </div>
+
+            <div className="monitoring-summary-grid">
+              <div className="surface-card feature-surface feature-surface-soft">
+                <span className="surface-kicker">{t("vault.monitoring.summary")}</span>
+                <ul className="request-reasoning-list">
+                  {(data?.trust.reasons || []).map((reason, index) => (
+                    <li key={`${activeWallet}-trust-${index}`}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="surface-card feature-surface">
+                <span className="surface-kicker">{t("vault.monitoring.activePayouts")}</span>
+                <strong className="hero-stat-value hero-stat-value-compact">{data?.monitoring.activePayouts || 0}</strong>
+                <p>{selectedWalletSummary?.lastPayoutTimestamp ? formatAbsoluteTime(selectedWalletSummary.lastPayoutTimestamp, locale, t("common.notAvailable")) : t("common.notAvailable")}</p>
+              </div>
+            </div>
+
+            <div className="timeline-stack">
+              {data?.events.map((event: WalletChronologyEvent) => (
+                <article key={event.id} className="surface-card request-card monitoring-event-card">
+                  <div className="request-card-head">
+                    <div>
+                      <span className="surface-kicker">{getMonitoringEventLabel(event.eventType, t)}</span>
+                      <h3>{event.explanation}</h3>
+                    </div>
+                    <span className="status-pill status-pill-muted">
+                      {formatAbsoluteTime(event.timestamp, locale, t("common.notAvailable"))}
+                    </span>
+                  </div>
+
+                  {(event.txSignature || event.requestPubkey) && (
+                    <div className="request-summary-grid">
+                      {event.requestPubkey && (
+                        <div className="request-meta">
+                          <span>{t("vault.meta.requestId")}</span>
+                          <strong>{shortKey(event.requestPubkey)}</strong>
+                        </div>
+                      )}
+                      {event.txSignature && (
+                        <div className="request-meta">
+                          <span>{t("vault.monitoring.tx")}</span>
+                          <strong>{shortKey(event.txSignature)}</strong>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function VaultDetail() {
   const { vaultAddress } = useParams();
   const { publicKey } = useWallet();
@@ -614,12 +899,21 @@ export default function VaultDetail() {
   const [reqDesc, setReqDesc] = useState("");
   const [depositAmount, setDepositAmount] = useState("1");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [activeTab, setActiveTab] = useState<"activity" | "monitoring">(() => {
+    const stored = readStoredMonitoringValue("tab", vaultAddress);
+    return stored === "monitoring" ? "monitoring" : "activity";
+  });
 
   useEffect(() => {
     if (vaultAddress) {
       setLastVaultAddress(vaultAddress, publicKey?.toBase58());
     }
   }, [publicKey, vaultAddress]);
+
+  useEffect(() => {
+    const stored = readStoredMonitoringValue("tab", vaultAddress);
+    setActiveTab(stored === "monitoring" ? "monitoring" : "activity");
+  }, [vaultAddress]);
 
   const showToast = (msg: string, type: "success" | "error") => {
     setToast({ msg, type });
@@ -969,56 +1263,85 @@ export default function VaultDetail() {
         </div>
       </section>
 
+      {vault && v.beneficiary && (
+        <section className="vault-tabs">
+          <button
+            type="button"
+            className={`vault-tab ${activeTab === "activity" ? "active" : ""}`}
+            onClick={() => {
+              setActiveTab("activity");
+              writeStoredMonitoringValue("tab", vaultAddress, "activity");
+            }}
+          >
+            {t("vault.tabs.activity")}
+          </button>
+          <button
+            type="button"
+            className={`vault-tab ${activeTab === "monitoring" ? "active" : ""}`}
+            onClick={() => {
+              setActiveTab("monitoring");
+              writeStoredMonitoringValue("tab", vaultAddress, "monitoring");
+            }}
+          >
+            {t("vault.tabs.monitoring")}
+          </button>
+        </section>
+      )}
+
       <section className="vault-workspace-grid vault-workspace-grid-enhanced">
         <div className="vault-main-column">
-          <div className="surface-card request-timeline-shell">
-            <div className="panel-topline">
-              <div>
-                <span className="surface-kicker">{t("vault.timelineKicker")}</span>
-                <h2>{t("vault.timelineTitle")}</h2>
+          {activeTab === "activity" ? (
+            <div className="surface-card request-timeline-shell">
+              <div className="panel-topline">
+                <div>
+                  <span className="surface-kicker">{t("vault.timelineKicker")}</span>
+                  <h2>{t("vault.timelineTitle")}</h2>
+                </div>
+                <span className="status-pill status-pill-muted">{`${reqs.length} ${t("vault.events")}`}</span>
               </div>
-              <span className="status-pill status-pill-muted">{`${reqs.length} ${t("vault.events")}`}</span>
+
+              <div className="timeline-stack">
+                <article className="surface-card request-card request-card-origin">
+                  <div className="request-card-head">
+                    <div>
+                      <span className="surface-kicker">{t("vault.genesisKicker")}</span>
+                      <h3>{`${v.totalDeposited.toFixed(2)} ${t("vault.genesisTitle")}`}</h3>
+                    </div>
+                    <span className="status-pill status-pill-success">{t("vault.initialized")}</span>
+                  </div>
+                  <p className="request-description">{t("vault.genesisText")}</p>
+                  <div className="request-meta-grid">
+                    <div className="request-meta">
+                      <span>{t("vault.meta.created")}</span>
+                      <strong>{formatAbsoluteTime(v.createdAt, locale, t("common.notAvailable"))}</strong>
+                    </div>
+                    <div className="request-meta">
+                      <span>{t("vault.meta.available")}</span>
+                      <strong>{v.available.toFixed(2)} SOL</strong>
+                    </div>
+                    <div className="request-meta">
+                      <span>{t("vault.meta.mode")}</span>
+                      <strong>{modeLabel}</strong>
+                    </div>
+                  </div>
+                </article>
+
+                {reqs.map((req) => (
+                  <RequestCard key={req.address} req={req} threshold={p.riskThreshold} />
+                ))}
+
+                {reqs.length === 0 && (
+                  <div className="empty-state-panel">
+                    <span className="surface-kicker">{t("vault.emptyKicker")}</span>
+                    <h3>{t("vault.emptyTitle")}</h3>
+                    <p>{t("vault.emptyText")}</p>
+                  </div>
+                )}
+              </div>
             </div>
-
-            <div className="timeline-stack">
-              <article className="surface-card request-card request-card-origin">
-                <div className="request-card-head">
-                  <div>
-                    <span className="surface-kicker">{t("vault.genesisKicker")}</span>
-                    <h3>{`${v.totalDeposited.toFixed(2)} ${t("vault.genesisTitle")}`}</h3>
-                  </div>
-                  <span className="status-pill status-pill-success">{t("vault.initialized")}</span>
-                </div>
-                <p className="request-description">{t("vault.genesisText")}</p>
-                <div className="request-meta-grid">
-                  <div className="request-meta">
-                    <span>{t("vault.meta.created")}</span>
-                    <strong>{formatAbsoluteTime(v.createdAt, locale, t("common.notAvailable"))}</strong>
-                  </div>
-                  <div className="request-meta">
-                    <span>{t("vault.meta.available")}</span>
-                    <strong>{v.available.toFixed(2)} SOL</strong>
-                  </div>
-                  <div className="request-meta">
-                    <span>{t("vault.meta.mode")}</span>
-                    <strong>{modeLabel}</strong>
-                  </div>
-                </div>
-              </article>
-
-              {reqs.map((req) => (
-                <RequestCard key={req.address} req={req} threshold={p.riskThreshold} />
-              ))}
-
-              {reqs.length === 0 && (
-                <div className="empty-state-panel">
-                  <span className="surface-kicker">{t("vault.emptyKicker")}</span>
-                  <h3>{t("vault.emptyTitle")}</h3>
-                  <p>{t("vault.emptyText")}</p>
-                </div>
-              )}
-            </div>
-          </div>
+          ) : (
+            <MonitoringPanel vaultAddress={vaultAddress} beneficiaryAddress={v.beneficiary || undefined} />
+          )}
         </div>
 
         <aside className="vault-side-column">

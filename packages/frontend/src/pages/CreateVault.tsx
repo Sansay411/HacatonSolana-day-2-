@@ -82,7 +82,8 @@ export default function CreateVault() {
   );
 
   const handleCreate = async () => {
-    if (!publicKey || !beneficiary) return;
+    const beneficiaryAddress = beneficiary.trim();
+    if (!publicKey || !beneficiaryAddress) return;
 
     if (runtime && !runtime.riskAuthority.ready) {
       setToast({ msg: t("create.executorNeedsAttention"), type: "error" });
@@ -91,7 +92,7 @@ export default function CreateVault() {
     }
 
     const result = await createVault({
-      beneficiary,
+      beneficiary: beneficiaryAddress,
       riskAuthority: effectiveRiskAuthority,
       depositSol: depositValue,
       perTxLimitSol: perTxValue || 1,
@@ -101,6 +102,25 @@ export default function CreateVault() {
     });
 
     if (result.success && result.vaultAddress) {
+      try {
+        await apiFetch("/api/vaults", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            vaultAddress: result.vaultAddress,
+            name: null,
+            description: null,
+            mode: "startup",
+            dailyLimitLamports: 0,
+            allowedTimeWindows: [],
+            categoryRules: [],
+            emergencyStopEnabled: false,
+          }),
+        });
+      } catch {
+        console.warn("Vault profile was not saved to backend catalog");
+      }
+
       setToast({ msg: t("create.toastSuccess"), type: "success" });
       setTimeout(() => navigate(`/vault/${result.vaultAddress}`), 1500);
     } else {

@@ -31,6 +31,19 @@ export function initDatabase(): void {
       UNIQUE(vault_pubkey, request_index)
     );
 
+    CREATE TABLE IF NOT EXISTS vault_profiles (
+      vault_pubkey TEXT PRIMARY KEY,
+      name TEXT,
+      description TEXT,
+      mode TEXT NOT NULL DEFAULT 'startup',
+      daily_limit_lamports INTEGER NOT NULL DEFAULT 0,
+      allowed_time_windows_json TEXT NOT NULL DEFAULT '[]',
+      category_rules_json TEXT NOT NULL DEFAULT '[]',
+      emergency_stop_enabled INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS risk_evaluations (
       id TEXT PRIMARY KEY,
       request_pubkey TEXT NOT NULL,
@@ -49,6 +62,8 @@ export function initDatabase(): void {
       reason TEXT NOT NULL,
       reasons_json TEXT,
       flags_json TEXT,
+      category TEXT,
+      patterns_json TEXT,
       input_payload TEXT,
       raw_response TEXT,
       decision_source TEXT NOT NULL,
@@ -65,9 +80,42 @@ export function initDatabase(): void {
       timestamp TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS wallet_monitors (
+      id TEXT PRIMARY KEY,
+      vault_pubkey TEXT NOT NULL,
+      wallet_pubkey TEXT NOT NULL,
+      request_pubkey TEXT NOT NULL UNIQUE,
+      payout_amount_lamports INTEGER NOT NULL,
+      payout_tx_signature TEXT,
+      payout_timestamp INTEGER NOT NULL,
+      monitoring_status TEXT NOT NULL DEFAULT 'active',
+      trust_score INTEGER NOT NULL DEFAULT 50,
+      trust_level TEXT NOT NULL DEFAULT 'warning',
+      last_evaluated_at TEXT,
+      notes_json TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS wallet_chronology_events (
+      id TEXT PRIMARY KEY,
+      vault_pubkey TEXT NOT NULL,
+      wallet_pubkey TEXT NOT NULL,
+      request_pubkey TEXT,
+      event_key TEXT NOT NULL UNIQUE,
+      event_type TEXT NOT NULL,
+      explanation TEXT NOT NULL,
+      tx_signature TEXT,
+      metadata_json TEXT,
+      event_timestamp INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_audit_vault ON audit_events(vault_pubkey);
     CREATE INDEX IF NOT EXISTS idx_requests_vault ON spend_request_details(vault_pubkey);
     CREATE INDEX IF NOT EXISTS idx_ai_decisions_request ON ai_decisions(request_id);
+    CREATE INDEX IF NOT EXISTS idx_wallet_monitors_vault_wallet ON wallet_monitors(vault_pubkey, wallet_pubkey);
+    CREATE INDEX IF NOT EXISTS idx_wallet_events_vault_wallet ON wallet_chronology_events(vault_pubkey, wallet_pubkey);
   `);
 
   const requestColumns = database
@@ -118,5 +166,25 @@ export function initDatabase(): void {
     database.exec(
       "ALTER TABLE ai_decisions ADD COLUMN input_payload TEXT"
     );
+  }
+
+  if (!aiDecisionColumns.some((column) => column.name === "category")) {
+    database.exec(
+      "ALTER TABLE ai_decisions ADD COLUMN category TEXT"
+    );
+  }
+
+  if (!aiDecisionColumns.some((column) => column.name === "patterns_json")) {
+    database.exec(
+      "ALTER TABLE ai_decisions ADD COLUMN patterns_json TEXT"
+    );
+  }
+
+  const walletMonitorColumns = database
+    .prepare("PRAGMA table_info(wallet_monitors)")
+    .all() as Array<{ name: string }>;
+
+  if (walletMonitorColumns.length > 0 && !walletMonitorColumns.some((column) => column.name === "notes_json")) {
+    database.exec("ALTER TABLE wallet_monitors ADD COLUMN notes_json TEXT");
   }
 }

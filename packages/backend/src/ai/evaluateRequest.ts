@@ -4,7 +4,9 @@ import {
   AIRequestInput,
   clampRiskScore,
   normalizeDecision,
+  sanitizeCategory,
   sanitizeFlags,
+  sanitizePatterns,
   sanitizePurposeText,
   sanitizeReasons,
 } from "./provider";
@@ -70,6 +72,15 @@ const RESPONSE_SCHEMA = {
       },
       required: ["high_velocity", "suspicious_pattern", "policy_violation"],
     },
+    category: {
+      type: "STRING",
+    },
+    behavioral_patterns: {
+      type: "ARRAY",
+      items: {
+        type: "STRING",
+      },
+    },
   },
   required: ["risk_score", "decision", "reasons", "flags"],
 } as const;
@@ -89,6 +100,11 @@ function formatHistory(input: AIRequestInput) {
 }
 
 function buildUserPrompt(input: AIRequestInput, sanitizedPurpose: string) {
+  const dailyLimitLine =
+    typeof input.vaultPolicy.dailyLimit === "number" && input.vaultPolicy.dailyLimit > 0
+      ? input.vaultPolicy.dailyLimit.toFixed(2)
+      : "not configured";
+
   return `Evaluate the following transaction request:
 
 Amount: ${input.amount.toFixed(2)} SOL
@@ -102,9 +118,25 @@ ${formatHistory(input)}
 Policy:
 
 * Max per tx: ${input.vaultPolicy.maxPerTx.toFixed(2)}
+* Daily limit: ${dailyLimitLine}
 * Cooldown: ${input.vaultPolicy.cooldown}
 * Total limit: ${input.vaultPolicy.totalLimit.toFixed(2)}
-* Risk threshold: ${input.vaultPolicy.riskThreshold}`;
+* Risk threshold: ${input.vaultPolicy.riskThreshold}
+* Vault mode: ${input.vaultPolicy.vaultModePreset || "startup"}
+
+Allowed time windows:
+${(input.vaultPolicy.allowedTimeWindows || [])
+  .map((window) => `- ${window.label}: ${window.startHour}:00-${window.endHour}:00`)
+  .join("\n") || "- no explicit time windows"}
+
+Category rules:
+${(input.vaultPolicy.categoryRules || [])
+  .filter((rule) => rule.enabled)
+  .map(
+    (rule) =>
+      `- ${rule.label} (${rule.category}) | max ${rule.maxAmountSol.toFixed(2)} SOL | review ${rule.requiresReview ? "required" : "optional"}`
+  )
+  .join("\n") || "- no category rules"}`;
 }
 
 export async function evaluateRequestWithGemini(
@@ -140,6 +172,8 @@ export async function evaluateRequestWithGemini(
     riskScore: clampRiskScore(Number(parsedJson.risk_score)),
     reasons: sanitizeReasons(parsedJson.reasons),
     flags: sanitizeFlags(parsedJson.flags),
+    category: sanitizeCategory(parsedJson.category),
+    behavioralPatterns: sanitizePatterns(parsedJson.behavioral_patterns),
     inputPayload,
     sanitizedPurpose,
     rawResponse: rawBody,

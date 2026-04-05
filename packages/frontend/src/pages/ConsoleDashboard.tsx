@@ -14,6 +14,7 @@ import {
 import { useI18n } from "../i18n";
 import { getLastVaultAddress } from "../utils/lastVault";
 import { getWalletSessions, upsertWalletSession, type WalletSessionRecord } from "../utils/walletRegistry";
+import { useVaultCatalog } from "../hooks/useVaultCatalog";
 
 function shortKey(key?: string | null, fallback?: string) {
   if (!key) return fallback || "";
@@ -32,8 +33,20 @@ function formatWalletTime(locale: string, timestamp: number) {
 export default function ConsoleDashboard() {
   const { connected, publicKey, wallet, wallets } = useWallet();
   const { t, locale } = useI18n();
+  const {
+    items: vaultCatalog,
+    loading: vaultCatalogLoading,
+    error: vaultCatalogError,
+    refetch: refetchVaultCatalog,
+  } = useVaultCatalog();
   const currentAddress = publicKey?.toBase58() || null;
   const [walletSessions, setWalletSessions] = useState<WalletSessionRecord[]>(() => getWalletSessions());
+
+  const getVaultModeLabel = (mode: "startup" | "grant" | "freelancer") => {
+    if (mode === "grant") return t("vaultMode.grant");
+    if (mode === "freelancer") return t("vaultMode.freelancer");
+    return t("vaultMode.startup");
+  };
 
   useEffect(() => {
     if (!connected || !currentAddress) return;
@@ -49,7 +62,7 @@ export default function ConsoleDashboard() {
   }, [connected, currentAddress, wallet?.adapter.icon, wallet?.adapter.name]);
 
   const currentWalletLastVault = getLastVaultAddress(currentAddress);
-  const lastVaultAddress = currentWalletLastVault || getLastVaultAddress();
+  const lastVaultAddress = currentWalletLastVault || getLastVaultAddress() || vaultCatalog[0]?.vaultAddress;
 
   const recentWallets = useMemo(() => walletSessions.slice(0, 4), [walletSessions]);
   const readyWalletApps = useMemo(
@@ -197,6 +210,64 @@ export default function ConsoleDashboard() {
         </div>
 
         <aside className="workspace-aside">
+          <div className="surface-card summary-panel">
+            <span className="surface-kicker">{t("console.catalogKicker")}</span>
+            <div className="panel-topline panel-topline-compact">
+              <div>
+                <h3>{t("console.catalogTitle")}</h3>
+              </div>
+            </div>
+
+            {vaultCatalogLoading ? (
+              <div className="console-inline-note">{t("console.catalogLoading")}</div>
+            ) : vaultCatalogError ? (
+              <div className="console-empty-state">
+                <div className="console-inline-note">{t("console.catalogError")}</div>
+                <button type="button" className="btn btn-secondary" onClick={refetchVaultCatalog}>
+                  <ArrowDownCircleIcon className="icon-svg icon-svg-sm" />
+                  {t("console.catalogRetry")}
+                </button>
+              </div>
+            ) : vaultCatalog.length ? (
+              <div className="session-stack">
+                {vaultCatalog.slice(0, 4).map((item) => (
+                  <article key={item.vaultAddress} className="wallet-session-card">
+                    <div className="wallet-session-head">
+                      <div className="wallet-session-title">
+                        <ShieldIcon className="icon-svg icon-svg-sm" />
+                        <div>
+                            <strong>{shortKey(item.vaultAddress, item.vaultAddress)}</strong>
+                            <span>{getVaultModeLabel(item.mode)}</span>
+                          </div>
+                      </div>
+                      <span className="status-pill status-pill-muted status-pill-inline">
+                        {item.analytics.pendingRequests}
+                      </span>
+                    </div>
+
+                    <div className="console-card-list wallet-session-meta">
+                      <div className="console-card-row">
+                        <span>{t("console.catalogRequests")}</span>
+                        <strong>{item.analytics.totalRequests}</strong>
+                      </div>
+                      <div className="console-card-row">
+                        <span>{t("console.catalogProtected")}</span>
+                        <strong>{(item.analytics.protectedFundsLamports / 1_000_000_000).toFixed(2)} SOL</strong>
+                      </div>
+                    </div>
+
+                    <Link to={`/vault/${item.vaultAddress}`} className="btn btn-secondary console-inline-action">
+                      <GridIcon className="icon-svg icon-svg-sm" />
+                      {t("console.catalogOpen")}
+                    </Link>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="console-inline-note">{t("console.catalogEmpty")}</div>
+            )}
+          </div>
+
           <div className="surface-card summary-panel">
             <span className="surface-kicker">{t("console.walletKicker")}</span>
             <div className="identity-list">

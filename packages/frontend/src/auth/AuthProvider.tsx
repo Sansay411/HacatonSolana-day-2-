@@ -32,8 +32,42 @@ interface AuthContextValue {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
+const AUTH_SNAPSHOT_KEY = "aegis-auth-snapshot";
+
+function readAuthSnapshot(): AuthIdentity | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(AUTH_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as AuthIdentity) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeAuthSnapshot(user: AuthIdentity | null) {
+  if (typeof window === "undefined") return;
+
+  if (!user) {
+    window.localStorage.removeItem(AUTH_SNAPSHOT_KEY);
+    return;
+  }
+
+  const safeSnapshot: AuthIdentity = {
+    uid: user.uid,
+    email: user.email,
+    displayName: user.displayName,
+    photoURL: user.photoURL,
+    providerId: user.providerId,
+  };
+
+  window.localStorage.setItem(AUTH_SNAPSHOT_KEY, JSON.stringify(safeSnapshot));
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<AuthIdentity | null>(null);
+  const [user, setUser] = useState<AuthIdentity | null>(() => readAuthSnapshot());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -50,7 +84,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch(() => undefined)
       .finally(() => {
         unsubscribe = onAuthStateChanged(auth, (nextUser) => {
-          setUser(toAuthIdentity(nextUser));
+          const identity = toAuthIdentity(nextUser);
+          setUser(identity);
+          writeAuthSnapshot(identity);
           setLoading(false);
         });
       });

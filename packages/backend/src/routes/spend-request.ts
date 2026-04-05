@@ -100,7 +100,10 @@ function sanitizeAiFindings(findings: unknown) {
     /rejected by hard policy/i,
     /hard policy/i,
     /cooldown policy/i,
+    /cooldown period/i,
+    /within the cooldown/i,
     /per-transaction limit/i,
+    /daily limit/i,
     /total vault limit/i,
     /current vault balance/i,
     /risk score exceeds threshold/i,
@@ -117,6 +120,14 @@ function sanitizeAiFindings(findings: unknown) {
       .filter((value) => !blockedPatterns.some((pattern) => pattern.test(value)))
       .map(normalizeDisplayReason)
   );
+}
+
+function buildBehavioralFindingsFromFlags(flags: unknown) {
+  const value = flags && typeof flags === "object" ? (flags as Record<string, unknown>) : {};
+  return dedupeItems([
+    value.high_velocity ? "Elevated request velocity detected." : null,
+    value.suspicious_pattern ? "Request pattern deviates from normal behavior." : null,
+  ]);
 }
 
 function sanitizeDecisionReasons(reasons: unknown) {
@@ -337,9 +348,22 @@ spendRequestRoutes.get("/:address", (req: Request, res: Response) => {
             : aiDecision
               ? "available"
               : "unavailable";
-    const aiFindings = sanitizeAiFindings(
-      auditPayload?.aiFindings || aiDecision?.reasons_json || []
-    );
+    const aiFindingsSource =
+      auditPayload?.behavioralPatterns ||
+      auditPayload?.aiFindings ||
+      aiDecision?.reasons_json ||
+      [];
+    const aiFindings = sanitizeAiFindings(aiFindingsSource);
+    const aiFlags =
+      aiStatus === "available" && aiDecision?.flags_json
+        ? { ...aiDecision.flags_json, policy_violation: false }
+        : null;
+    const visibleAiFindings =
+      aiStatus === "available"
+        ? aiFindings.length > 0
+          ? aiFindings
+          : buildBehavioralFindingsFromFlags(aiFlags)
+        : [];
     const aiRiskScore =
       auditPayload && Object.prototype.hasOwnProperty.call(auditPayload, "aiRiskScore")
         ? (auditPayload.aiRiskScore as number | null)
@@ -404,11 +428,8 @@ spendRequestRoutes.get("/:address", (req: Request, res: Response) => {
             : null,
         riskScore: aiRiskScore,
         riskLevel: toRiskLevel(aiRiskScore),
-        findings: aiStatus === "available" ? aiFindings : [],
-        flags:
-          aiStatus === "available" && aiDecision?.flags_json
-            ? { ...aiDecision.flags_json, policy_violation: false }
-            : null,
+        findings: visibleAiFindings,
+        flags: aiFlags,
         riskSource: auditPayload?.aiRiskSource || (aiStatus === "available" ? "gemini" : "fallback_engine"),
         attempted: Boolean(aiDecision),
         inProgress: detail.processing_status === "pending" || detail.processing_status === "processing",

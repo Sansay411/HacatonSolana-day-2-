@@ -127,3 +127,47 @@ export interface ApiError {
   message: string;
   details?: unknown;
 }
+
+export interface VaultWalletSummary {
+  walletAddress: string;
+  trackedPayouts: number;
+  lastPayoutTimestamp: number | null;
+  lastUpdatedAt: string | null;
+  trustScore: number;
+  trustLevel: "stable" | "warning" | "high_risk";
+  protectedAmountLamports: number;
+}
+
+export interface WalletTrustSummary {
+  score: number;
+  level: "stable" | "warning" | "high_risk";
+  lastUpdatedAt: string | null;
+  reasons: string[];
+}
+
+export interface WalletMonitoringSummary {
+  status: "idle" | "active" | "completed";
+  trackedPayouts: number;
+  activePayouts: number;
+  totalPayoutAmountLamports: number;
+  summary: string;
+}
+
+export interface WalletChronologyEvent {
+  id: string;
+  eventType: string;
+  explanation: string;
+  txSignature: string | null;
+  timestamp: number;
+  metadata: Record<string, unknown> | null;
+  requestPubkey: string | null;
+}
+
+export interface WalletChronologyResponse {
+  walletAddress: string;
+  vaultAddress: string;
+  beneficiaryWallet: string;
+  trust: WalletTrustSummary;
+  monitoring: WalletMonitoringSummary;
+  events: WalletChronologyEvent[];
+}
