@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import {
+  getWalletChronologyPage,
   getVaultAnalytics,
   getVaultAuditEvents,
   getVaultProfile,
@@ -12,6 +13,47 @@ import { listVaultWallets, refreshWalletMonitoring } from "../monitoring/service
 
 export const vaultRoutes = Router();
 
+function respondWalletScopeError(res: Response, err: unknown, defaultMessage: string) {
+  const message = err instanceof Error ? err.message : defaultMessage;
+  if (/does not belong to this vault context/i.test(message)) {
+    return res.status(404).json({ error: "not_found", message });
+  }
+  return res.status(500).json({ error: "internal", message: defaultMessage });
+}
+
+vaultRoutes.get("/wallet/:walletAddress/history", async (req: Request, res: Response) => {
+  try {
+    const { walletAddress } = req.params;
+    const vaultAddress = String(req.query.vaultAddress || "").trim() || null;
+    const limit = Number(req.query.limit || 4);
+    const cursor = String(req.query.cursor || "").trim() || null;
+
+    if (vaultAddress) {
+      await refreshWalletMonitoring({
+        vaultPubkey: vaultAddress,
+        walletPubkey: walletAddress,
+      });
+    }
+
+    const page = getWalletChronologyPage({
+      walletPubkey: walletAddress,
+      vaultPubkey: vaultAddress,
+      limit,
+      cursor,
+    });
+
+    res.json({
+      walletAddress,
+      vaultAddress,
+      items: page.items,
+      nextCursor: page.nextCursor,
+    });
+  } catch (err) {
+    console.error("Error fetching wallet history:", err);
+    respondWalletScopeError(res, err, "Failed to fetch wallet history");
+  }
+});
+
 vaultRoutes.get("/", (_req: Request, res: Response) => {
   try {
     const items = listVaultProfiles();
@@ -20,7 +62,13 @@ vaultRoutes.get("/", (_req: Request, res: Response) => {
       items: items.map((item) => ({
         vaultAddress: item.vaultPubkey,
         name: item.name,
+        projectName: item.projectName,
+        purposeType: item.purposeType,
         description: item.description,
+        allowedCategories: item.allowedCategories,
+        funderWallet: item.funderWallet,
+        beneficiaryWallet: item.beneficiaryWallet,
+        payoutWallet: item.payoutWallet,
         mode: item.mode,
         dailyLimitLamports: item.dailyLimitLamports,
         emergencyStopEnabled: item.emergencyStopEnabled,
@@ -40,7 +88,13 @@ vaultRoutes.post("/", (req: Request, res: Response) => {
     const {
       vaultAddress,
       name,
+      projectName,
+      purposeType,
       description,
+      allowedCategories,
+      funderWallet,
+      beneficiaryWallet,
+      payoutWallet,
       mode,
       dailyLimitLamports,
       allowedTimeWindows,
@@ -58,7 +112,15 @@ vaultRoutes.post("/", (req: Request, res: Response) => {
     saveVaultProfile({
       vaultPubkey: vaultAddress,
       name,
+      projectName,
+      purposeType,
       description,
+      allowedCategories: Array.isArray(allowedCategories)
+        ? allowedCategories.filter(Boolean).map((item: unknown) => String(item))
+        : [],
+      funderWallet: funderWallet ? String(funderWallet) : undefined,
+      beneficiaryWallet: beneficiaryWallet ? String(beneficiaryWallet) : undefined,
+      payoutWallet: payoutWallet ? String(payoutWallet) : undefined,
       mode,
       dailyLimitLamports: Number(dailyLimitLamports || 0),
       allowedTimeWindows: Array.isArray(allowedTimeWindows)
@@ -116,6 +178,11 @@ vaultRoutes.get("/:address/config", (req: Request, res: Response) => {
           key: "beneficiary",
           label: "Beneficiary",
           capabilities: ["submit spend request"],
+        },
+        {
+          key: "payout_wallet",
+          label: "Payout Wallet",
+          capabilities: ["receive approved payout"],
         },
         {
           key: "risk_authority",
@@ -192,7 +259,7 @@ vaultRoutes.get("/:address/wallets/:walletAddress/trust", async (req: Request, r
     });
   } catch (err) {
     console.error("Error fetching wallet trust:", err);
-    res.status(500).json({ error: "internal", message: "Failed to fetch wallet trust" });
+    respondWalletScopeError(res, err, "Failed to fetch wallet trust");
   }
 });
 
@@ -203,10 +270,22 @@ vaultRoutes.get("/:address/wallets/:walletAddress/chronology", async (req: Reque
       vaultPubkey: address,
       walletPubkey: walletAddress,
     });
+    const limit = Number(req.query.limit || 4);
+    const cursor = String(req.query.cursor || "").trim() || null;
+    const page = getWalletChronologyPage({
+      walletPubkey: walletAddress,
+      vaultPubkey: address,
+      limit,
+      cursor,
+    });
 
-    res.json(monitoring);
+    res.json({
+      ...monitoring,
+      events: page.items,
+      nextCursor: page.nextCursor,
+    });
   } catch (err) {
     console.error("Error fetching wallet chronology:", err);
-    res.status(500).json({ error: "internal", message: "Failed to fetch wallet chronology" });
+    respondWalletScopeError(res, err, "Failed to fetch wallet chronology");
   }
 });

@@ -6,7 +6,6 @@ import {
   CheckCircleIcon,
   GlobeIcon,
   GridIcon,
-  ShieldIcon,
   SparklesIcon,
   WalletIcon,
 } from "../components/Icons";
@@ -51,11 +50,11 @@ export default function Landing() {
 
   const heroStats = useMemo(
     () => [
-      { label: t("landing.resume.connectedWallet"), value: connected ? "1" : "0" },
-      { label: t("landing.resume.knownVaults"), value: String(vaultItems.length) },
-      { label: t("landing.stats.control"), value: t("landing.stats.controlValue") },
+      { label: t("landing.stats.primaryOne"), value: t("landing.stats.primaryOneValue") },
+      { label: t("landing.stats.primaryTwo"), value: t("landing.stats.primaryTwoValue") },
+      { label: t("landing.stats.primaryThree"), value: t("landing.stats.primaryThreeValue") },
     ],
-    [connected, t, vaultItems.length]
+    [t]
   );
 
   const howSteps = useMemo(
@@ -195,7 +194,7 @@ export default function Landing() {
 
         <section className="marketing-hero marketing-hero-auth">
           <div className="hero-copy-panel marketing-hero-copy">
-            <div className="eyebrow-pill">{t("landing.productName")}</div>
+            <div className="eyebrow-pill">{t("landing.eyebrow")}</div>
             <h1 className="hero-display">{t("landing.tagline")}</h1>
             <p className="hero-paragraph">{t("landing.heroExplanation")}</p>
 
@@ -228,14 +227,14 @@ export default function Landing() {
 
             <div className="landing-next-step-strip">
               <div className="landing-next-step-card">
-                <span className="surface-kicker">{t("landing.resumeKicker")}</span>
-                <strong>{t("landing.resumeTitle")}</strong>
-                <p>{t("landing.resumeText")}</p>
+                <span className="surface-kicker">{t("landing.valueKicker")}</span>
+                <strong>{t("landing.valueTitle")}</strong>
+                <p>{t("landing.valueText")}</p>
               </div>
               <div className="landing-next-step-card">
-                <span className="surface-kicker">{t("landing.resume.lastVault")}</span>
+                <span className="surface-kicker">{t("landing.accessKicker")}</span>
                 <strong>
-                  {lastVaultAddress ? shortWalletAddress(lastVaultAddress) : t("common.none")}
+                  {connected ? t("landing.accessConnected") : t("landing.accessSeparate")}
                 </strong>
                 <p>
                   {connected
@@ -250,13 +249,13 @@ export default function Landing() {
             {isAuthenticated ? (
               <section className="auth-panel surface-card">
                 <div className="auth-panel-topline">
-                  <span className="surface-kicker">{t("auth.accountReady")}</span>
+                  <span className="surface-kicker">{t("landing.workspaceKicker")}</span>
                   <span className="status-pill status-pill-success">{t("auth.signedIn")}</span>
                 </div>
 
                 <div className="auth-copy">
-                  <h2>{user?.displayName || user?.email || t("auth.account")}</h2>
-                  <p>{t("landing.authenticatedCopy")}</p>
+                  <h2>{t("landing.workspaceTitle")}</h2>
+                  <p>{t("landing.workspaceText")}</p>
                 </div>
 
                 <div className="auth-state-stack">
@@ -289,14 +288,14 @@ export default function Landing() {
                 {!connected && <p className="auth-wallet-hint">{t("wallet.connectAfterAuthHint")}</p>}
 
                 <div className="landing-catalog-panel">
-                  <span className="surface-kicker">{t("landing.resumeKicker")}</span>
+                  <span className="surface-kicker">{t("landing.vaultsKicker")}</span>
                   {authLoading || connecting ? (
-                    <p className="muted-copy">{t("landing.resume.rehydrating")}</p>
+                    <p className="muted-copy">{t("landing.vaultsLoading")}</p>
                   ) : vaultsLoading ? (
-                    <p className="muted-copy">{t("landing.resume.loading")}</p>
+                    <p className="muted-copy">{t("landing.vaultsLoading")}</p>
                   ) : vaultsError ? (
                     <div className="landing-empty-state">
-                      <p className="muted-copy">{t("landing.resume.error")}</p>
+                      <p className="muted-copy">{t("landing.vaultsError")}</p>
                       <button type="button" className="btn btn-secondary btn-sm" onClick={refetch}>
                         <AlertCircleIcon className="icon-svg icon-svg-sm" />
                         {t("common.retry")}
@@ -316,10 +315,10 @@ export default function Landing() {
                     </div>
                   ) : (
                     <div className="landing-empty-state">
-                      <p className="muted-copy">{t("landing.resume.empty")}</p>
+                      <p className="muted-copy">{t("landing.vaultsEmpty")}</p>
                       <Link to="/create" className="btn btn-secondary btn-sm">
-                        <ShieldIcon className="icon-svg icon-svg-sm" />
-                        {t("landing.cta.console")}
+                        <GridIcon className="icon-svg icon-svg-sm" />
+                        {t("landing.finalPrimary")}
                       </Link>
                     </div>
                   )}
@@ -412,7 +411,7 @@ export default function Landing() {
             <div className="trust-grid trust-grid-extended">
               {securityBlocks.map((item) => (
                 <article key={item.title} className="trust-card">
-                  <ShieldIcon className="icon-svg icon-svg-sm" />
+                  <CheckCircleIcon className="icon-svg icon-svg-sm" />
                   <div>
                     <h3>{item.title}</h3>
                     <p>{item.text}</p>

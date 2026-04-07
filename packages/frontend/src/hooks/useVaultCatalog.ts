@@ -4,7 +4,13 @@ import { apiFetch } from "../lib/api";
 export interface VaultCatalogItem {
   vaultAddress: string;
   name: string | null;
+  projectName: string | null;
+  purposeType: "startup" | "grant" | "infra" | "public_project";
   description: string | null;
+  allowedCategories: string[];
+  funderWallet: string | null;
+  beneficiaryWallet: string | null;
+  payoutWallet: string | null;
   mode: "startup" | "grant" | "freelancer";
   dailyLimitLamports: number;
   emergencyStopEnabled: boolean;

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { config } from "../config";
 import { getRiskAuthorityStatus } from "../solana/client";
+import { isFirebaseVerificationConfigured } from "../auth/firebaseToken";
 
 export const systemRoutes = Router();
 
@@ -13,6 +14,8 @@ systemRoutes.get("/runtime", async (_req, res) => {
       aiConfigured: Boolean(config.ai.geminiApiKey),
       aiTimeoutMs: config.ai.timeoutMs,
       firebaseAuthForwarding: true,
+      firebaseVerificationConfigured: isFirebaseVerificationConfigured(),
+      firebaseRequireVerifiedAuth: config.firebase.requireVerifiedAuth,
       riskAuthority,
     });
   } catch (error: any) {

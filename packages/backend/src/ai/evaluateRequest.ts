@@ -1,10 +1,13 @@
 import {
+  AIFlags,
   AIParsedOutput,
   AIProviderResult,
   AIRequestInput,
   clampRiskScore,
-  normalizeDecision,
+  normalizeDecisionHint,
+  sanitizeBehaviorFlags,
   sanitizeCategory,
+  sanitizeExplanation,
   sanitizeFlags,
   sanitizePatterns,
   sanitizePurposeText,
@@ -47,30 +50,25 @@ const RESPONSE_SCHEMA = {
     risk_score: {
       type: "NUMBER",
     },
-    decision: {
+    decision_hint: {
       type: "STRING",
-      enum: ["approve", "reject"],
+      enum: ["approve", "review", "reject"],
+    },
+    flags: {
+      type: "ARRAY",
+      items: {
+        type: "STRING",
+        enum: ["high_frequency", "repeat_after_reject", "category_mismatch", "suspicious_pattern"],
+      },
+    },
+    explanation: {
+      type: "STRING",
     },
     reasons: {
       type: "ARRAY",
       items: {
         type: "STRING",
       },
-    },
-    flags: {
-      type: "OBJECT",
-      properties: {
-        high_velocity: {
-          type: "BOOLEAN",
-        },
-        suspicious_pattern: {
-          type: "BOOLEAN",
-        },
-        policy_violation: {
-          type: "BOOLEAN",
-        },
-      },
-      required: ["high_velocity", "suspicious_pattern", "policy_violation"],
     },
     category: {
       type: "STRING",
@@ -82,15 +80,15 @@ const RESPONSE_SCHEMA = {
       },
     },
   },
-  required: ["risk_score", "decision", "reasons", "flags"],
+  required: ["risk_score", "decision_hint", "flags", "explanation"],
 } as const;
 
 function formatHistory(input: AIRequestInput) {
-  if (input.requestHistory.length === 0) {
+  if (input.behavior.lastRequests.length === 0) {
     return "- no recent requests";
   }
 
-  return input.requestHistory
+  return input.behavior.lastRequests
     .slice(0, 10)
     .map(
       (item) =>
@@ -100,52 +98,94 @@ function formatHistory(input: AIRequestInput) {
 }
 
 function buildUserPrompt(input: AIRequestInput, sanitizedPurpose: string) {
+  const limits = input.vault.limits;
   const dailyLimitLine =
-    typeof input.vaultPolicy.dailyLimit === "number" && input.vaultPolicy.dailyLimit > 0
-      ? input.vaultPolicy.dailyLimit.toFixed(2)
+    typeof limits.dailyLimit === "number" && limits.dailyLimit > 0
+      ? limits.dailyLimit.toFixed(2)
       : "not configured";
+
+  const aiContext = {
+    request: {
+      amount: Number(input.request.amount.toFixed(4)),
+      description: sanitizedPurpose,
+      timestamp: input.request.timestamp,
+    },
+    vault: {
+      purpose_type: input.vault.purposeType,
+      allowed_categories: input.vault.allowedCategories,
+      limits: {
+        max_per_tx: limits.maxPerTx,
+        daily_limit: dailyLimitLine,
+        cooldown_seconds: limits.cooldown,
+        total_limit: limits.totalLimit,
+        risk_threshold: limits.riskThreshold,
+      },
+    },
+    behavior: {
+      lastRequests: input.behavior.lastRequests,
+      rejectCount: input.behavior.rejectCount,
+      requestFrequency: input.behavior.requestFrequency,
+      timeSinceLastRequest: input.behavior.timeSinceLastRequest,
+      preDetectedFlags: input.behavior.flags,
+    },
+    trustScore: input.trustScore,
+    walletAddress: input.walletAddress,
+  };
 
   return `Evaluate the following transaction request:
 
-Amount: ${input.amount.toFixed(2)} SOL
+Amount: ${input.request.amount.toFixed(2)} SOL
 Purpose: "${sanitizedPurpose}"
 Wallet: ${input.walletAddress}
-Timestamp: ${new Date(input.timestamp * 1000).toISOString()}
+Timestamp: ${new Date(input.request.timestamp * 1000).toISOString()}
 
 Recent activity:
 ${formatHistory(input)}
 
 Policy:
 
-* Max per tx: ${input.vaultPolicy.maxPerTx.toFixed(2)}
+* Max per tx: ${limits.maxPerTx.toFixed(2)}
 * Daily limit: ${dailyLimitLine}
-* Cooldown: ${input.vaultPolicy.cooldown}
-* Total limit: ${input.vaultPolicy.totalLimit.toFixed(2)}
-* Risk threshold: ${input.vaultPolicy.riskThreshold}
-* Vault mode: ${input.vaultPolicy.vaultModePreset || "startup"}
+* Cooldown: ${limits.cooldown}
+* Total limit: ${limits.totalLimit.toFixed(2)}
+* Risk threshold: ${limits.riskThreshold}
+* Vault mode: ${limits.vaultModePreset || "startup"}
+
+Behavioral context:
+* Reject count: ${input.behavior.rejectCount}
+* Request frequency in recent window: ${input.behavior.requestFrequency}
+* Time since last request: ${input.behavior.timeSinceLastRequest ?? "n/a"} seconds
+* Pre-detected flags: ${input.behavior.flags.join(", ") || "none"}
+* Trust score: ${input.trustScore}
 
 Allowed time windows:
-${(input.vaultPolicy.allowedTimeWindows || [])
+${(limits.allowedTimeWindows || [])
   .map((window) => `- ${window.label}: ${window.startHour}:00-${window.endHour}:00`)
   .join("\n") || "- no explicit time windows"}
 
 Category rules:
-${(input.vaultPolicy.categoryRules || [])
+${(limits.categoryRules || [])
   .filter((rule) => rule.enabled)
   .map(
     (rule) =>
       `- ${rule.label} (${rule.category}) | max ${rule.maxAmountSol.toFixed(2)} SOL | review ${rule.requiresReview ? "required" : "optional"}`
   )
-  .join("\n") || "- no category rules"}`;
+  .join("\n") || "- no category rules"}
+
+Structured context JSON:
+${JSON.stringify(aiContext, null, 2)}`;
 }
 
 export async function evaluateRequestWithGemini(
   input: AIRequestInput
 ): Promise<AIProviderResult> {
-  const sanitizedPurpose = sanitizePurposeText(input.purpose);
+  const sanitizedPurpose = sanitizePurposeText(input.request.description);
   const inputPayload = JSON.stringify({
     ...input,
-    purpose: sanitizedPurpose,
+    request: {
+      ...input.request,
+      description: sanitizedPurpose,
+    },
   });
 
   const { rawBody, contentText } = await generateGeminiJson({
@@ -161,17 +201,32 @@ export async function evaluateRequestWithGemini(
     throw new Error(`Gemini returned non-JSON content: ${contentText}`);
   }
 
-  const decision = normalizeDecision(parsedJson.decision);
-  if (!decision) {
-    throw new Error(`Gemini returned invalid decision: ${parsedJson.decision}`);
+  const decisionHint = normalizeDecisionHint(parsedJson.decision_hint);
+  if (!decisionHint) {
+    throw new Error(`Gemini returned invalid decision hint: ${parsedJson.decision_hint}`);
   }
+
+  const behavioralFlags = sanitizeBehaviorFlags(parsedJson.flags);
+  const explanation = sanitizeExplanation(parsedJson.explanation);
+  const reasons = sanitizeReasons(parsedJson.reasons || [explanation]);
+  const derivedFlags: AIFlags = {
+    high_velocity:
+      behavioralFlags.includes("high_frequency") || behavioralFlags.includes("repeat_after_reject"),
+    suspicious_pattern:
+      behavioralFlags.includes("suspicious_pattern") ||
+      behavioralFlags.includes("category_mismatch"),
+    policy_violation: false,
+  };
 
   return {
     provider: "gemini",
-    decision,
+    decision: decisionHint === "approve" ? "approve" : "reject",
+    decisionHint,
     riskScore: clampRiskScore(Number(parsedJson.risk_score)),
-    reasons: sanitizeReasons(parsedJson.reasons),
-    flags: sanitizeFlags(parsedJson.flags),
+    reasons,
+    explanation,
+    flags: sanitizeFlags(derivedFlags),
+    behavioralFlags,
     category: sanitizeCategory(parsedJson.category),
     behavioralPatterns: sanitizePatterns(parsedJson.behavioral_patterns),
     inputPayload,

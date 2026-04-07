@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
@@ -8,7 +8,7 @@ import {
   GridIcon,
   HomeIcon,
   LogOutIcon,
-  ShieldIcon,
+  PlusIcon,
   WalletIcon,
 } from "./Icons";
 import WalletActionButton from "./WalletActionButton";
@@ -17,6 +17,7 @@ import { getLastVaultAddress } from "../utils/lastVault";
 import brandLogoUrl from "../../../../logo/Logo.png";
 import { useAuth } from "../auth/useAuth";
 import { shortWalletAddress } from "../lib/solanaWallets";
+import { getSelectedWalletAddress, setSelectedWalletAddress } from "../utils/walletRegistry";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -29,9 +30,12 @@ export default function AppShell({ children }: AppShellProps) {
   const { setVisible } = useWalletModal();
   const { lang, setLanguage, t } = useI18n();
   const { user, signOut } = useAuth();
-  const lastVaultAddress = getLastVaultAddress(publicKey?.toBase58()) || getLastVaultAddress();
+  const selectedWalletAddress = publicKey?.toBase58() || getSelectedWalletAddress();
+  const lastVaultAddress = getLastVaultAddress(selectedWalletAddress) || getLastVaultAddress();
   const [menuOpen, setMenuOpen] = useState(false);
   const [walletMenuOpen, setWalletMenuOpen] = useState(false);
+  const walletMenuRef = useRef<HTMLDivElement | null>(null);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   const navItems = [
     {
@@ -44,7 +48,7 @@ export default function AppShell({ children }: AppShellProps) {
       label: t("shell.nav.create"),
       to: "/create",
       active: location.pathname === "/create",
-      icon: ShieldIcon,
+      icon: PlusIcon,
     },
     {
       label: t("shell.nav.dashboard"),
@@ -73,6 +77,41 @@ export default function AppShell({ children }: AppShellProps) {
   }, [user?.displayName, user?.email]);
   const walletProviderIcon = connected ? wallet?.adapter.icon : undefined;
   const walletProviderName = connected ? wallet?.adapter.name || t("wallet.providerUnknown") : t("shell.walletIdle");
+
+  React.useEffect(() => {
+    if (publicKey?.toBase58()) {
+      setSelectedWalletAddress(publicKey.toBase58());
+    }
+  }, [publicKey]);
+
+  React.useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+
+      if (walletMenuRef.current && !walletMenuRef.current.contains(target)) {
+        setWalletMenuOpen(false);
+      }
+
+      if (profileMenuRef.current && !profileMenuRef.current.contains(target)) {
+        setMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setWalletMenuOpen(false);
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   const handleSignOut = async () => {
     setMenuOpen(false);
@@ -150,11 +189,14 @@ export default function AppShell({ children }: AppShellProps) {
                 </button>
               </div>
 
-              <div className="profile-menu-shell">
+              <div className="profile-menu-shell" ref={walletMenuRef}>
                 <button
                   type="button"
                   className={`profile-chip profile-chip-wallet ${walletMenuOpen ? "open" : ""}`}
-                  onClick={() => setWalletMenuOpen((current) => !current)}
+                  onClick={() => {
+                    setWalletMenuOpen((current) => !current);
+                    setMenuOpen(false);
+                  }}
                 >
                   <div className={`profile-chip-avatar ${walletProviderIcon ? "profile-chip-avatar-wallet" : ""}`}>
                     {walletProviderIcon ? (
@@ -189,7 +231,9 @@ export default function AppShell({ children }: AppShellProps) {
                       <p>
                         {connected
                           ? `${walletProviderName} · ${shortWalletAddress(publicKey?.toBase58())}`
-                          : t("wallet.connectToStart")}
+                          : selectedWalletAddress
+                            ? `${t("wallet.savedWorkspace")} · ${shortWalletAddress(selectedWalletAddress)}`
+                            : t("wallet.connectToStart")}
                       </p>
                     </div>
                     <div className="wallet-menu-meta">
@@ -223,11 +267,14 @@ export default function AppShell({ children }: AppShellProps) {
                 )}
               </div>
 
-              <div className="profile-menu-shell">
+              <div className="profile-menu-shell" ref={profileMenuRef}>
                 <button
                   type="button"
                   className={`profile-chip profile-chip-identity ${menuOpen ? "open" : ""}`}
-                  onClick={() => setMenuOpen((current) => !current)}
+                  onClick={() => {
+                    setMenuOpen((current) => !current);
+                    setWalletMenuOpen(false);
+                  }}
                 >
                   <div className="profile-chip-avatar profile-chip-avatar-auth">
                     {user?.photoURL ? (

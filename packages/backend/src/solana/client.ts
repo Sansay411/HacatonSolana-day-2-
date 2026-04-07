@@ -3,6 +3,7 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
+  SendTransactionError,
   SystemProgram,
   TransactionInstruction,
   TransactionMessage,
@@ -179,19 +180,42 @@ export async function sendRiskAuthorityTransaction(
   const conn = getConnection();
   const authority = getRiskAuthority();
 
-  const { blockhash } = await conn.getLatestBlockhash();
+  const latestBlockhash = await conn.getLatestBlockhash("confirmed");
 
   const messageV0 = new TransactionMessage({
     payerKey: authority.publicKey,
-    recentBlockhash: blockhash,
+    recentBlockhash: latestBlockhash.blockhash,
     instructions,
   }).compileToV0Message();
 
   const tx = new VersionedTransaction(messageV0);
   tx.sign([authority]);
 
+  const simulation = await conn.simulateTransaction(tx, {
+    commitment: "processed",
+  });
+
+  if (simulation.value.err) {
+    const logs = simulation.value.logs || [];
+    throw new SendTransactionError({
+      action: "simulate",
+      signature: "",
+      transactionMessage: `Risk authority simulation failed: ${JSON.stringify(
+        simulation.value.err
+      )}`,
+      logs,
+    });
+  }
+
   const signature = await conn.sendTransaction(tx);
-  await conn.confirmTransaction(signature, "confirmed");
+  await conn.confirmTransaction(
+    {
+      signature,
+      blockhash: latestBlockhash.blockhash,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    },
+    "confirmed"
+  );
 
   return signature;
 }
@@ -205,8 +229,7 @@ export async function approveSpendRequestOnChain(params: {
 }): Promise<string> {
   const authority = getRiskAuthority();
   const anchorProgram = getProgram();
-
-  return anchorProgram.methods
+  const instruction = await anchorProgram.methods
     .approveSpendRequest(params.riskScore)
     .accountsPartial({
       riskAuthority: authority.publicKey,
@@ -216,7 +239,9 @@ export async function approveSpendRequestOnChain(params: {
       beneficiary: params.beneficiaryPubkey,
       systemProgram: SystemProgram.programId,
     })
-    .rpc();
+    .instruction();
+
+  return sendRiskAuthorityTransaction([instruction]);
 }
 
 export async function rejectSpendRequestOnChain(params: {
@@ -226,13 +251,14 @@ export async function rejectSpendRequestOnChain(params: {
 }): Promise<string> {
   const authority = getRiskAuthority();
   const anchorProgram = getProgram();
-
-  return anchorProgram.methods
+  const instruction = await anchorProgram.methods
     .rejectSpendRequest(params.riskScore)
     .accountsPartial({
       riskAuthority: authority.publicKey,
       vault: params.vaultPubkey,
       spendRequest: params.spendRequestPubkey,
     })
-    .rpc();
+    .instruction();
+
+  return sendRiskAuthorityTransaction([instruction]);
 }

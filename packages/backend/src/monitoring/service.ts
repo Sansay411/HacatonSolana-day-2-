@@ -1,7 +1,13 @@
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import {
+  getAiDecision,
+  getVaultAuditEvents,
+  getVaultRequests,
   getWalletChronologyEvents,
   getWalletMonitors,
+  getWalletTrustProfile,
+  listWalletRequestActivity,
+  listVaultTrustProfiles,
   listVaultMonitorWallets,
   saveWalletChronologyEvent,
   saveWalletMonitor,
@@ -10,6 +16,19 @@ import {
 import { getConnection, getProgram } from "../solana/client";
 
 type TrustLevel = "stable" | "warning" | "high_risk";
+
+interface VaultWalletMonitoringSummary {
+  walletAddress: string;
+  trackedPayouts: number;
+  lastPayoutTimestamp: number | null;
+  lastUpdatedAt: string | null;
+  trustScore: number;
+  trustLevel: TrustLevel;
+  protectedAmountLamports: number;
+  successfulRequests: number;
+  rejectedRequests: number;
+  cooldownViolations: number;
+}
 
 interface WalletActivitySnapshot {
   outgoingTransactions: Array<{
@@ -129,10 +148,170 @@ async function fetchWalletActivity(params: {
   };
 }
 
+function isRpcRateLimitError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return /429/i.test(error.message) || /too many requests/i.test(error.message);
+}
+
 async function getVaultBeneficiary(vaultPubkey: string) {
   const program = getProgram();
   const vault = (await (program.account as any).vault.fetch(new PublicKey(vaultPubkey))) as any;
   return vault.beneficiary.toBase58();
+}
+
+function extractExecutedApprovalSnapshot(rawResponse: string | null | undefined) {
+  if (!rawResponse) return null;
+
+  try {
+    const parsed = JSON.parse(rawResponse) as {
+      finalDecision?: string;
+      payoutExecutedOnChain?: boolean;
+      txSignature?: string | null;
+      finalRiskScore?: number | null;
+    };
+
+    if (parsed.finalDecision !== "approved") return null;
+    if (!parsed.payoutExecutedOnChain) return null;
+    if (!parsed.txSignature) return null;
+
+    return {
+      txSignature: parsed.txSignature,
+      finalRiskScore:
+        parsed.finalRiskScore === null || parsed.finalRiskScore === undefined
+          ? null
+          : Number(parsed.finalRiskScore),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function ensureHistoricalApprovedPayoutMonitoring(params: {
+  vaultPubkey: string;
+  walletPubkey: string;
+}) {
+  const existingMonitors = new Set(
+    getWalletMonitors(params.vaultPubkey, params.walletPubkey).map((item) => item.requestPubkey)
+  );
+
+  const requestHistory = listWalletRequestActivity(params.vaultPubkey, params.walletPubkey, 100);
+  const auditEvents = getVaultAuditEvents(params.vaultPubkey);
+  const knownRequests = new Set(requestHistory.map((item) => item.requestPubkey));
+
+  for (const request of getVaultRequests(params.vaultPubkey)) {
+    if (knownRequests.has(request.request_pubkey)) continue;
+
+    const aiDecision = getAiDecision(request.request_pubkey);
+    if (!aiDecision || aiDecision.decision !== "approve") continue;
+
+    const auditMatch = auditEvents.find((event) => {
+      if (event.event_type !== "ai_decision_approved") return false;
+      if (!event.details) return false;
+
+      try {
+        const details = JSON.parse(event.details) as { requestPubkey?: string };
+        return details.requestPubkey === request.request_pubkey;
+      } catch {
+        return false;
+      }
+    });
+
+    if (!auditMatch?.tx_signature) continue;
+
+    requestHistory.push({
+      requestPubkey: request.request_pubkey,
+      vaultPubkey: request.vault_pubkey,
+      walletPubkey: params.walletPubkey,
+      requestIndex: Number(request.request_index || 0),
+      amountLamports: Number(request.amount_lamports || 0),
+      description: request.description || "",
+      createdAt: Math.floor(new Date(request.created_at).getTime() / 1000) || 0,
+      lastProcessedAt: auditMatch.timestamp
+        ? Math.floor(new Date(auditMatch.timestamp).getTime() / 1000)
+        : null,
+      processingStatus: "completed",
+      decision: "approved",
+      aiDecisionSource:
+        aiDecision.decision_source === "gemini" || aiDecision.decision_source === "fallback"
+          ? aiDecision.decision_source
+          : null,
+      riskScore:
+        aiDecision.risk_score === null || aiDecision.risk_score === undefined
+          ? null
+          : Number(aiDecision.risk_score),
+    });
+  }
+
+  for (const request of requestHistory) {
+    if (request.decision !== "approved") continue;
+    if (existingMonitors.has(request.requestPubkey)) continue;
+
+    const aiDecision = getAiDecision(request.requestPubkey);
+    const executedApproval = extractExecutedApprovalSnapshot(aiDecision?.raw_response);
+    const auditMatch = auditEvents.find((event) => {
+      if (event.event_type !== "ai_decision_approved") return false;
+      if (!event.details) return false;
+
+      try {
+        const details = JSON.parse(event.details) as { requestPubkey?: string };
+        return details.requestPubkey === request.requestPubkey;
+      } catch {
+        return false;
+      }
+    });
+    const txSignature = executedApproval?.txSignature || auditMatch?.tx_signature || null;
+    if (!txSignature) continue;
+
+    const payoutTimestamp =
+      request.lastProcessedAt ||
+      (auditMatch?.timestamp ? Math.floor(new Date(auditMatch.timestamp).getTime() / 1000) : null) ||
+      request.createdAt;
+
+    saveWalletMonitor({
+      vaultPubkey: params.vaultPubkey,
+      walletPubkey: params.walletPubkey,
+      requestPubkey: request.requestPubkey,
+      payoutAmountLamports: request.amountLamports,
+      payoutTxSignature: txSignature,
+      payoutTimestamp,
+      monitoringStatus: "active",
+      trustScore: 50,
+      trustLevel: "warning",
+      notes: {
+        restoredFromDecisionHistory: true,
+        finalRiskScore: executedApproval?.finalRiskScore ?? request.riskScore ?? null,
+      },
+    });
+
+    saveWalletChronologyEvent({
+      vaultPubkey: params.vaultPubkey,
+      walletPubkey: params.walletPubkey,
+      requestPubkey: request.requestPubkey,
+      eventKey: `${request.requestPubkey}:payout_received`,
+      eventType: "payout_received",
+      explanation: "Approved payout reached the beneficiary wallet and monitoring started.",
+      txSignature,
+      metadata: {
+        payoutAmountSol: request.amountLamports / LAMPORTS_PER_SOL,
+        restoredFromDecisionHistory: true,
+      },
+      eventTimestamp: payoutTimestamp,
+    });
+
+    saveWalletChronologyEvent({
+      vaultPubkey: params.vaultPubkey,
+      walletPubkey: params.walletPubkey,
+      requestPubkey: request.requestPubkey,
+      eventKey: `${request.requestPubkey}:monitoring_activated`,
+      eventType: "monitoring_activated",
+      explanation: "Post-payout monitoring activated for this beneficiary wallet.",
+      metadata: {
+        baselineTrustScore: 50,
+        restoredFromDecisionHistory: true,
+      },
+      eventTimestamp: payoutTimestamp,
+    });
+  }
 }
 
 export async function registerApprovedPayoutMonitoring(params: {
@@ -188,8 +367,13 @@ export async function registerApprovedPayoutMonitoring(params: {
 
 export async function listVaultWallets(vaultPubkey: string) {
   const beneficiaryWallet = await getVaultBeneficiary(vaultPubkey);
+  await ensureHistoricalApprovedPayoutMonitoring({
+    vaultPubkey,
+    walletPubkey: beneficiaryWallet,
+  });
   const monitorRows = listVaultMonitorWallets(vaultPubkey);
-  const indexed = new Map(
+  const trustProfiles = listVaultTrustProfiles(vaultPubkey);
+  const indexed = new Map<string, VaultWalletMonitoringSummary>(
     monitorRows.map((row) => [
       row.wallet_pubkey,
       {
@@ -200,9 +384,28 @@ export async function listVaultWallets(vaultPubkey: string) {
         trustScore: row.avg_trust_score === null ? 50 : Math.round(row.avg_trust_score),
         trustLevel: getTrustLevel(row.avg_trust_score === null ? 50 : row.avg_trust_score),
         protectedAmountLamports: Number(row.total_payout_amount_lamports || 0),
+        successfulRequests: 0,
+        rejectedRequests: 0,
+        cooldownViolations: 0,
       },
     ])
   );
+
+  for (const trust of trustProfiles) {
+    const existing = indexed.get(trust.walletPubkey);
+    indexed.set(trust.walletPubkey, {
+      walletAddress: trust.walletPubkey,
+      trackedPayouts: existing?.trackedPayouts || 0,
+      lastPayoutTimestamp: existing?.lastPayoutTimestamp || trust.lastDecidedAt || trust.lastRequestAt || null,
+      lastUpdatedAt: trust.updatedAt,
+      trustScore: trust.trustScore,
+      trustLevel: getTrustLevel(trust.trustScore),
+      protectedAmountLamports: existing?.protectedAmountLamports || 0,
+      successfulRequests: trust.successfulRequests,
+      rejectedRequests: trust.rejectedRequests,
+      cooldownViolations: trust.cooldownViolations,
+    });
+  }
 
   if (!indexed.has(beneficiaryWallet)) {
     indexed.set(beneficiaryWallet, {
@@ -213,6 +416,9 @@ export async function listVaultWallets(vaultPubkey: string) {
       trustScore: 50,
       trustLevel: "warning",
       protectedAmountLamports: 0,
+      successfulRequests: 0,
+      rejectedRequests: 0,
+      cooldownViolations: 0,
     });
   }
 
@@ -226,19 +432,40 @@ export async function refreshWalletMonitoring(params: {
   walletPubkey: string;
 }) {
   const beneficiaryWallet = await getVaultBeneficiary(params.vaultPubkey);
+  await ensureHistoricalApprovedPayoutMonitoring({
+    vaultPubkey: params.vaultPubkey,
+    walletPubkey: params.walletPubkey,
+  });
   const monitors = getWalletMonitors(params.vaultPubkey, params.walletPubkey);
+  const trustProfile = getWalletTrustProfile(params.vaultPubkey, params.walletPubkey);
 
-  if (params.walletPubkey !== beneficiaryWallet && monitors.length === 0) {
+  if (params.walletPubkey !== beneficiaryWallet && monitors.length === 0 && !trustProfile) {
     throw new Error("Wallet does not belong to this vault context.");
   }
 
   for (const monitor of monitors) {
-    const snapshot = await fetchWalletActivity({
-      walletPubkey: monitor.walletPubkey,
-      sinceTimestamp: monitor.payoutTimestamp,
-      payoutAmountLamports: monitor.payoutAmountLamports,
-      ignoreSignature: monitor.payoutTxSignature,
-    });
+    let snapshot: WalletActivitySnapshot;
+    let rpcBackoffApplied = false;
+
+    try {
+      snapshot = await fetchWalletActivity({
+        walletPubkey: monitor.walletPubkey,
+        sinceTimestamp: monitor.payoutTimestamp,
+        payoutAmountLamports: monitor.payoutAmountLamports,
+        ignoreSignature: monitor.payoutTxSignature,
+      });
+    } catch (error) {
+      if (!isRpcRateLimitError(error)) {
+        throw error;
+      }
+
+      rpcBackoffApplied = true;
+      snapshot = {
+        outgoingTransactions: [],
+        firstOutgoingAt: null,
+        totalMovedLamports: 0,
+      };
+    }
 
     const firstDelayMinutes =
       snapshot.firstOutgoingAt === null
@@ -269,6 +496,7 @@ export async function refreshWalletMonitoring(params: {
         outgoingCount: snapshot.outgoingTransactions.length,
         movedRatio,
         firstOutgoingDelayMinutes: firstDelayMinutes,
+        rpcBackoffApplied,
       },
     });
 
@@ -360,12 +588,12 @@ export async function refreshWalletMonitoring(params: {
   const refreshedMonitors = getWalletMonitors(params.vaultPubkey, params.walletPubkey);
   const events = getWalletChronologyEvents(params.vaultPubkey, params.walletPubkey);
 
-  const latestTrustScore =
-    refreshedMonitors.length > 0
+  const latestTrustScore = trustProfile?.trustScore
+    ?? (refreshedMonitors.length > 0
       ? Math.round(
           refreshedMonitors.reduce((sum, item) => sum + item.trustScore, 0) / refreshedMonitors.length
         )
-      : 50;
+      : 50);
   const trustLevel = getTrustLevel(latestTrustScore);
   const activeMonitorCount = refreshedMonitors.filter((item) => item.monitoringStatus === "active").length;
 
@@ -377,6 +605,7 @@ export async function refreshWalletMonitoring(params: {
       score: latestTrustScore,
       level: trustLevel,
       lastUpdatedAt:
+        trustProfile?.updatedAt ||
         refreshedMonitors[0]?.lastEvaluatedAt ||
         refreshedMonitors[0]?.updatedAt ||
         null,
@@ -389,6 +618,11 @@ export async function refreshWalletMonitoring(params: {
         firstOutgoingDelayMinutes:
           (refreshedMonitors[0]?.notes?.firstOutgoingDelayMinutes as number | undefined) ?? null,
       }),
+      successfulRequests: trustProfile?.successfulRequests || 0,
+      rejectedRequests: trustProfile?.rejectedRequests || 0,
+      cooldownViolations: trustProfile?.cooldownViolations || 0,
+      lowRiskRequests: trustProfile?.lowRiskRequests || 0,
+      stabilityRewards: trustProfile?.stabilityRewards || 0,
     },
     monitoring: {
       status: activeMonitorCount > 0 ? "active" : refreshedMonitors.length > 0 ? "completed" : "idle",
@@ -397,7 +631,9 @@ export async function refreshWalletMonitoring(params: {
       totalPayoutAmountLamports: refreshedMonitors.reduce((sum, item) => sum + item.payoutAmountLamports, 0),
       summary:
         refreshedMonitors.length > 0
-          ? "Estimated wallet behavior is tracked after approved payouts."
+          ? refreshedMonitors.some((item) => item.notes?.rpcBackoffApplied)
+            ? "Approved payouts are tracked. Live activity refresh is temporarily limited by the Solana RPC rate limit."
+            : "Estimated wallet behavior is tracked after approved payouts."
           : "No approved payout has activated monitoring yet.",
     },
     events: events.map((event) => ({

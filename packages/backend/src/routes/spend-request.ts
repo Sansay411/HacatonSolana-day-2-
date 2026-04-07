@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { createHash } from "crypto";
 import {
+  findRecentDuplicateSpendRequest,
   saveSpendRequestDetail,
   updateSpendRequestProcessing,
   getSpendRequestDetail,
@@ -8,10 +9,16 @@ import {
   getAiDecision,
   getRiskEvaluation,
   saveAuditEvent,
+  getAuditEventForRequest,
 } from "../db/queries";
 import { processSpendRequest } from "../solana/listener";
+import { requireVerifiedFirebaseAuth } from "../auth/firebaseToken";
+import { getProgram } from "../solana/client";
+import { PublicKey } from "@solana/web3.js";
 
 export const spendRequestRoutes = Router();
+
+const DUPLICATE_WINDOW_SECONDS = 90;
 
 type DecisionSourceLabel =
   | "pending"
@@ -150,6 +157,15 @@ function buildFallbackDecisionReasons(reasons: string[]) {
   ]).slice(0, 4);
 }
 
+function buildFallbackApprovalReasons(auditPayload: Record<string, any>, reasons: string[]) {
+  return dedupeItems([
+    typeof auditPayload?.providerReason === "string" ? normalizeDisplayReason(auditPayload.providerReason) : null,
+    typeof auditPayload?.reason === "string" ? normalizeDisplayReason(auditPayload.reason) : null,
+    ...reasons,
+    "Fallback policy engine approved the request within configured limits.",
+  ]).slice(0, 3);
+}
+
 function inferOverrideType(auditPayload: Record<string, any> | null) {
   if (auditPayload?.enforcementType === "policy_override") return "policy_override";
   if (auditPayload?.enforcementType === "decision_rule") return "decision_rule";
@@ -196,11 +212,88 @@ function safeParseJson(value: string | null | undefined) {
   }
 }
 
+function mergeAuditPayload(
+  rawPayload: Record<string, any> | null,
+  auditDetails: Record<string, any> | null,
+  auditEvent: any
+): Record<string, any> {
+  return {
+    ...(auditDetails || {}),
+    ...(rawPayload || {}),
+    txSignature: rawPayload?.txSignature || auditDetails?.txSignature || auditEvent?.tx_signature || null,
+  };
+}
+
 function toRiskLevel(score: number | null) {
   if (score === null || score === undefined) return null;
   if (score <= 30) return "low";
   if (score <= 55) return "medium";
   return "high";
+}
+
+function sanitizeDescriptionInput(value: unknown) {
+  return String(value || "")
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+}
+
+async function validateSpendRequestInput(params: {
+  vaultAddress: string;
+  amountLamports: number;
+  description: string;
+}) {
+  if (!params.vaultAddress) {
+    return { valid: false, errorCode: "INVALID_INPUT", message: "vaultAddress is required" };
+  }
+
+  if (!Number.isFinite(params.amountLamports) || params.amountLamports <= 0) {
+    return { valid: false, errorCode: "INVALID_INPUT", message: "Amount must be greater than zero" };
+  }
+
+  if (params.description.length < 10 || params.description.length > 300) {
+    return {
+      valid: false,
+      errorCode: "INVALID_INPUT",
+      message: "Description must be between 10 and 300 characters",
+    };
+  }
+
+  try {
+    const program = getProgram();
+    const vault = (await (program.account as any).vault.fetch(new PublicKey(params.vaultAddress))) as any;
+    const [policyPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("policy"), new PublicKey(params.vaultAddress).toBuffer()],
+      program.programId
+    );
+    const policy = (await (program.account as any).policy.fetch(policyPda)) as any;
+
+    if (params.amountLamports > policy.perTxLimit.toNumber()) {
+      return {
+        valid: false,
+        errorCode: "INVALID_INPUT",
+        message: "Amount exceeds the configured per-request payout limit",
+      };
+    }
+
+    const availableLamports = vault.totalDeposited.toNumber() - vault.totalDisbursed.toNumber();
+    if (params.amountLamports > availableLamports) {
+      return {
+        valid: false,
+        errorCode: "INVALID_INPUT",
+        message: "Amount exceeds available vault balance",
+      };
+    }
+  } catch (error) {
+    return {
+      valid: false,
+      errorCode: "INVALID_INPUT",
+      message: "Vault or policy could not be validated",
+    };
+  }
+
+  return { valid: true as const };
 }
 
 /**
@@ -213,7 +306,7 @@ function toRiskLevel(score: number | null) {
  * 3. Backend stores description, computes risk score
  * 4. Backend sends approve/reject transaction on-chain
  */
-spendRequestRoutes.post("/", async (req: Request, res: Response) => {
+spendRequestRoutes.post("/", requireVerifiedFirebaseAuth, async (req: Request, res: Response) => {
   try {
     const {
       vaultAddress,
@@ -221,6 +314,7 @@ spendRequestRoutes.post("/", async (req: Request, res: Response) => {
       requestAddress,
       description,
       amount,
+      walletAddress,
     } = req.body;
 
     // Validate required fields
@@ -231,31 +325,110 @@ spendRequestRoutes.post("/", async (req: Request, res: Response) => {
       });
     }
 
+    const normalizedDescription = sanitizeDescriptionInput(description);
+
+    if (!normalizedDescription) {
+      return res.status(400).json({
+        error: "validation",
+        message: "Description cannot be empty",
+      });
+    }
+
+    const amountLamports = Number(amount || 0);
+    const validation = await validateSpendRequestInput({
+      vaultAddress,
+      amountLamports,
+      description: normalizedDescription,
+    });
+
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: "validation",
+        message: validation.message,
+        errorCode: validation.errorCode,
+      });
+    }
+
+    const normalizedWalletAddress =
+      typeof walletAddress === "string" ? walletAddress.trim() : "";
+
+    if (!normalizedWalletAddress) {
+      return res.status(400).json({
+        error: "validation",
+        message: "walletAddress is required",
+        errorCode: "INVALID_INPUT",
+      });
+    }
+
     // Compute description hash for integrity verification
     const descriptionHash = createHash("sha256")
-      .update(description)
+      .update(normalizedDescription)
       .digest("hex");
+
+    const duplicate = findRecentDuplicateSpendRequest({
+      vaultPubkey: vaultAddress,
+      walletPubkey: normalizedWalletAddress,
+      descriptionHash,
+      amountLamports,
+      windowSeconds: DUPLICATE_WINDOW_SECONDS,
+    });
+
+    if (duplicate && duplicate.request_pubkey !== requestAddress) {
+      return res.status(409).json({
+        error: "duplicate",
+        message: "Duplicate request detected inside the protected time window",
+        errorCode: "RATE_LIMIT_EXCEEDED",
+      });
+    }
+
+    const existing = getSpendRequestDetail(requestAddress);
+    if (
+      existing &&
+      ["processing", "completed"].includes(String(existing.processing_status || ""))
+    ) {
+      return res.status(202).json({
+        requestAddress,
+        descriptionHash,
+        riskScore: null,
+        decision: "pending",
+        reason: null,
+        reasons: [],
+        flags: null,
+        provider: "gemini",
+        decisionSource: "pending",
+        signals: null,
+        txSignature: null,
+        errorCode: null,
+      });
+    }
 
     // Store off-chain description
     saveSpendRequestDetail({
       vaultPubkey: vaultAddress,
       requestIndex,
       requestPubkey: requestAddress,
-      description,
+      description: normalizedDescription,
       descriptionHash,
-      amountLamports: Number(amount || 0),
+      amountLamports,
+      requesterWalletPubkey: normalizedWalletAddress,
     });
     updateSpendRequestProcessing({
       requestPubkey: requestAddress,
-      status: "processing",
+      status: "pending",
       error: null,
     });
 
     try {
+      updateSpendRequestProcessing({
+        requestPubkey: requestAddress,
+        status: "processing",
+        error: null,
+      });
+
       const result = await processSpendRequest({
         requestPubkey: requestAddress,
         vaultPubkey: vaultAddress,
-        purpose: description,
+        purpose: normalizedDescription,
       });
 
       updateSpendRequestProcessing({
@@ -276,6 +449,7 @@ spendRequestRoutes.post("/", async (req: Request, res: Response) => {
         decisionSource: result.decisionSource,
         signals: result.signals,
         txSignature: result.txSignature || null,
+        errorCode: result.errorCode || null,
       });
     } catch (error: any) {
       const message = error?.message || "Failed to execute AI decision on-chain";
@@ -297,9 +471,15 @@ spendRequestRoutes.post("/", async (req: Request, res: Response) => {
     }
   } catch (err) {
     console.error("Error processing spend request:", err);
-    res.status(500).json({
-      error: "internal",
-      message: err instanceof Error ? err.message : "Failed to process spend request",
+    const message = err instanceof Error ? err.message : "Failed to process spend request";
+    const errorCodeMatch = /RATE_LIMIT_EXCEEDED|COOLDOWN_ACTIVE|TRUST_TOO_LOW|HIGH_RISK_BLOCKED/.exec(
+      message
+    );
+    const statusCode = errorCodeMatch ? 429 : 500;
+    res.status(statusCode).json({
+      error: errorCodeMatch ? "risk_control" : "internal",
+      message,
+      errorCode: errorCodeMatch?.[0] || null,
     });
   }
 });
@@ -314,7 +494,13 @@ spendRequestRoutes.get("/:address", (req: Request, res: Response) => {
     const detail = getSpendRequestDetail(address);
     const risk = getRiskEvaluation(address);
     const aiDecision = getAiDecision(address);
-    const auditPayload = safeParseJson(aiDecision?.raw_response);
+    const auditEvent = getAuditEventForRequest(address);
+    const auditDetails = safeParseJson(auditEvent?.details);
+    const auditPayload = mergeAuditPayload(
+      safeParseJson(aiDecision?.raw_response),
+      auditDetails,
+      auditEvent
+    );
 
     if (!detail) {
       return res.status(404).json({
@@ -336,8 +522,6 @@ spendRequestRoutes.get("/:address", (req: Request, res: Response) => {
         : aiDecision?.decision_source === "fallback"
           ? "fallback_safety_engine"
           : "ai_policy_validation";
-    const decisionSource =
-      normalizeDecisionSource(auditPayload?.finalDecisionSource, fallbackDecisionSource);
     const aiStatus =
       auditPayload?.aiStatus === "available" || auditPayload?.aiStatus === "unavailable"
         ? auditPayload.aiStatus
@@ -348,6 +532,13 @@ spendRequestRoutes.get("/:address", (req: Request, res: Response) => {
             : aiDecision
               ? "available"
               : "unavailable";
+    const decisionSource =
+      aiStatus === "unavailable"
+        ? "fallback_safety_engine"
+        : normalizeDecisionSource(
+            auditPayload?.finalDecisionSource || auditPayload?.decisionSource,
+            fallbackDecisionSource
+          );
     const aiFindingsSource =
       auditPayload?.behavioralPatterns ||
       auditPayload?.aiFindings ||
@@ -373,17 +564,21 @@ spendRequestRoutes.get("/:address", (req: Request, res: Response) => {
     const requestRecordedOnChain =
       typeof auditPayload?.requestRecordedOnChain === "boolean"
         ? auditPayload.requestRecordedOnChain
-        : true;
+        : finalDecision !== "pending"
+          ? Boolean(auditEvent || auditPayload?.txSignature || aiDecision)
+          : false;
     const payoutExecutedOnChain =
       typeof auditPayload?.payoutExecutedOnChain === "boolean"
         ? auditPayload.payoutExecutedOnChain
-        : finalDecision === "approved" && Boolean(auditPayload?.txSignature);
+        : finalDecision === "approved" && Boolean(auditPayload?.txSignature || auditEvent?.tx_signature);
     const rawFinalReasons = sanitizeDecisionReasons(
       Array.isArray(auditPayload?.finalReasons) ? auditPayload.finalReasons : aiDecision?.reasons_json || []
     );
     const finalReasons =
       aiStatus === "unavailable"
-        ? buildFallbackDecisionReasons(rawFinalReasons)
+        ? finalDecision === "approved"
+          ? buildFallbackApprovalReasons(auditPayload, rawFinalReasons)
+          : buildFallbackDecisionReasons(rawFinalReasons)
         : rawFinalReasons;
     const finalReason =
       aiStatus === "unavailable"
@@ -426,25 +621,59 @@ spendRequestRoutes.get("/:address", (req: Request, res: Response) => {
               ? auditPayload.aiRecommendation || null
               : aiDecision?.decision || null
             : null,
+        decisionHint:
+          aiStatus === "available"
+            ? auditPayload?.aiDecisionHint || null
+            : null,
         riskScore: aiRiskScore,
+        effectiveRisk:
+          typeof auditPayload?.effectiveRisk === "number" ? auditPayload.effectiveRisk : null,
+        trustScore:
+          typeof auditPayload?.trustScore === "number" ? auditPayload.trustScore : null,
         riskLevel: toRiskLevel(aiRiskScore),
         findings: visibleAiFindings,
+        explanation:
+          typeof auditPayload?.aiExplanation === "string" ? auditPayload.aiExplanation : null,
+        behaviorFlags: Array.isArray(auditPayload?.behavioralFlags)
+          ? auditPayload.behavioralFlags.filter((item: unknown) => typeof item === "string")
+          : [],
         flags: aiFlags,
         riskSource: auditPayload?.aiRiskSource || (aiStatus === "available" ? "gemini" : "fallback_engine"),
         attempted: Boolean(aiDecision),
         inProgress: detail.processing_status === "pending" || detail.processing_status === "processing",
       },
       policyEnforcement: {
-        perTxLimit: normalizePolicyCheck(auditPayload?.policyChecks?.per_tx_limit, resolved),
+        perTxLimit:
+          auditPayload?.policyChecks?.per_tx_limit
+            ? normalizePolicyCheck(auditPayload?.policyChecks?.per_tx_limit, resolved)
+            : finalDecision === "approved"
+              ? "passed"
+              : normalizePolicyCheck(auditPayload?.policyChecks?.per_tx_limit, resolved),
         cooldown: cooldownFailed
           ? "failed"
-          : normalizePolicyCheck(auditPayload?.policyChecks?.cooldown, resolved),
-        totalLimit: normalizePolicyCheck(auditPayload?.policyChecks?.total_limit, resolved),
-        vaultMode: normalizePolicyMode(auditPayload?.policyChecks?.vault_mode, resolved),
+          : auditPayload?.policyChecks?.cooldown
+            ? normalizePolicyCheck(auditPayload?.policyChecks?.cooldown, resolved)
+            : finalDecision === "approved"
+              ? "passed"
+              : normalizePolicyCheck(auditPayload?.policyChecks?.cooldown, resolved),
+        totalLimit:
+          auditPayload?.policyChecks?.total_limit
+            ? normalizePolicyCheck(auditPayload?.policyChecks?.total_limit, resolved)
+            : finalDecision === "approved"
+              ? "passed"
+              : normalizePolicyCheck(auditPayload?.policyChecks?.total_limit, resolved),
+        vaultMode:
+          auditPayload?.policyChecks?.vault_mode
+            ? normalizePolicyMode(auditPayload?.policyChecks?.vault_mode, resolved)
+            : finalDecision === "approved"
+              ? "active"
+              : normalizePolicyMode(auditPayload?.policyChecks?.vault_mode, resolved),
         overrideType,
         overrideReason:
           aiStatus === "unavailable"
-            ? "Fallback safety rules triggered rejection."
+            ? finalDecision === "rejected"
+              ? "Fallback safety rules triggered rejection."
+              : null
             : typeof auditPayload?.hardPolicyReason === "string"
               ? normalizeDisplayReason(auditPayload.hardPolicyReason)
               : null,
@@ -456,9 +685,9 @@ spendRequestRoutes.get("/:address", (req: Request, res: Response) => {
         requestRecordedOnChain,
         payoutExecutedOnChain,
         reasons: finalReasons,
-        txSignature: auditPayload?.txSignature || null,
+        txSignature: auditPayload?.txSignature || auditEvent?.tx_signature || null,
       },
-      evaluatedAt: aiDecision?.created_at || risk?.evaluated_at || null,
+      evaluatedAt: aiDecision?.created_at || auditEvent?.timestamp || risk?.evaluated_at || null,
       processingStatus: detail.processing_status || "pending",
       processingError: detail.processing_error || null,
       lastProcessedAt: detail.last_processed_at || null,

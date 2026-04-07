@@ -283,6 +283,25 @@ export function useVaultActions() {
 
       setPending(true);
       try {
+        const normalizedDescription = String(params.description || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 300);
+
+        if (normalizedDescription.length < 10) {
+          return {
+            success: false,
+            error: t("actions.invalidDescriptionLength"),
+          };
+        }
+
+        if (!Number.isFinite(params.amount) || params.amount <= 0) {
+          return {
+            success: false,
+            error: t("actions.invalidAmount"),
+          };
+        }
+
         const vaultPda = new PublicKey(params.vaultAddress);
         const vaultAccount = (await program.account.vault.fetch(vaultPda)) as any;
         const beneficiaryAddress = vaultAccount.beneficiary.toBase58();
@@ -296,7 +315,7 @@ export function useVaultActions() {
         }
 
         // Hash description
-        const descBytes = new TextEncoder().encode(params.description);
+        const descBytes = new TextEncoder().encode(normalizedDescription);
         const descBuffer = new ArrayBuffer(descBytes.byteLength);
         new Uint8Array(descBuffer).set(descBytes);
         const descHash = Array.from(
@@ -331,23 +350,44 @@ export function useVaultActions() {
           return submitResult;
         }
 
-        // Send description to backend for risk evaluation
-        try {
-          await apiFetch("/api/spend-requests", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              vaultAddress: params.vaultAddress,
-              requestIndex: requestCount,
-              requestAddress: spendRequestPda.toBase58(),
-              description: params.description,
-              amount: params.amount * LAMPORTS_PER_SOL,
-              walletAddress: publicKey.toBase58(),
-            }),
-          });
-        } catch {
-          // Backend may be offline — not critical for demo
-          console.warn("Backend notification failed — risk engine offline");
+        const backendResponse = await apiFetch("/api/spend-requests", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            vaultAddress: params.vaultAddress,
+            requestIndex: requestCount,
+            requestAddress: spendRequestPda.toBase58(),
+            description: normalizedDescription,
+            amount: params.amount * LAMPORTS_PER_SOL,
+            walletAddress: publicKey.toBase58(),
+          }),
+        });
+
+        if (!backendResponse.ok) {
+          const payload = await backendResponse.json().catch(() => null);
+          const errorCode = payload?.errorCode;
+          const backendMessage = payload?.message;
+
+          if (errorCode === "RATE_LIMIT_EXCEEDED") {
+            return { success: false, error: t("actions.rateLimitExceeded") };
+          }
+          if (errorCode === "COOLDOWN_ACTIVE") {
+            return { success: false, error: t("actions.cooldownActive") };
+          }
+          if (errorCode === "TRUST_TOO_LOW") {
+            return { success: false, error: t("actions.trustTooLow") };
+          }
+          if (errorCode === "HIGH_RISK_BLOCKED") {
+            return { success: false, error: t("actions.highRiskBlocked") };
+          }
+          if (errorCode === "INVALID_INPUT") {
+            return { success: false, error: backendMessage || t("actions.invalidInput") };
+          }
+
+          return {
+            success: false,
+            error: backendMessage || t("actions.transactionFailed", { label: t("actions.submitLabel") }),
+          };
         }
 
         return { success: true, signature: submitResult.signature };

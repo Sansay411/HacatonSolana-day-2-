@@ -7,13 +7,18 @@ import {
   ArrowDownCircleIcon,
   CheckCircleIcon,
   GridIcon,
-  ShieldIcon,
-  SparklesIcon,
+  PlusIcon,
   WalletIcon,
 } from "../components/Icons";
 import { useI18n } from "../i18n";
 import { getLastVaultAddress } from "../utils/lastVault";
-import { getWalletSessions, upsertWalletSession, type WalletSessionRecord } from "../utils/walletRegistry";
+import {
+  getSelectedWalletAddress,
+  getWalletSessions,
+  setSelectedWalletAddress,
+  upsertWalletSession,
+  type WalletSessionRecord,
+} from "../utils/walletRegistry";
 import { useVaultCatalog } from "../hooks/useVaultCatalog";
 
 function shortKey(key?: string | null, fallback?: string) {
@@ -21,13 +26,37 @@ function shortKey(key?: string | null, fallback?: string) {
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
 
-function formatWalletTime(locale: string, timestamp: number) {
-  return new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(timestamp);
+const SUPPORTED_WALLET_APPS = [
+  { key: "phantom", label: "Phantom" },
+  { key: "solflare", label: "Solflare" },
+  { key: "backpack", label: "Backpack" },
+  { key: "trust", label: "Trust" },
+  { key: "coinbase", label: "Coinbase Wallet" },
+  { key: "okx", label: "OKX Wallet" },
+] as const;
+
+function resolveSupportedWalletApp(name?: string | null) {
+  const normalizedName = (name || "").trim().toLowerCase();
+  if (!normalizedName || normalizedName.includes("metamask")) return null;
+
+  return (
+    SUPPORTED_WALLET_APPS.find((provider) => normalizedName.includes(provider.key)) || null
+  );
+}
+
+function formatWalletTime(locale: string, timestamp?: number | null) {
+  if (!timestamp) return "—";
+
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(timestamp));
+  } catch {
+    return "—";
+  }
 }
 
 export default function ConsoleDashboard() {
@@ -41,6 +70,9 @@ export default function ConsoleDashboard() {
   } = useVaultCatalog();
   const currentAddress = publicKey?.toBase58() || null;
   const [walletSessions, setWalletSessions] = useState<WalletSessionRecord[]>(() => getWalletSessions());
+  const [selectedWalletAddressState, setSelectedWalletAddressState] = useState<string | null>(() =>
+    getSelectedWalletAddress()
+  );
 
   const getVaultModeLabel = (mode: "startup" | "grant" | "freelancer") => {
     if (mode === "grant") return t("vaultMode.grant");
@@ -51,25 +83,60 @@ export default function ConsoleDashboard() {
   useEffect(() => {
     if (!connected || !currentAddress) return;
 
-    setWalletSessions(
-      upsertWalletSession({
-        address: currentAddress,
-        walletName: wallet?.adapter.name,
-        walletIcon: wallet?.adapter.icon,
-        network: "Solana Devnet",
-      })
-    );
+    const sessions = upsertWalletSession({
+      address: currentAddress,
+      walletName: wallet?.adapter.name,
+      walletIcon: wallet?.adapter.icon,
+      network: "Solana Devnet",
+    });
+    setWalletSessions(sessions);
+    setSelectedWalletAddressState(currentAddress);
   }, [connected, currentAddress, wallet?.adapter.icon, wallet?.adapter.name]);
 
-  const currentWalletLastVault = getLastVaultAddress(currentAddress);
-  const lastVaultAddress = currentWalletLastVault || getLastVaultAddress() || vaultCatalog[0]?.vaultAddress;
+  useEffect(() => {
+    if (currentAddress) return;
+    if (!selectedWalletAddressState) return;
+
+    const stillKnown = walletSessions.some((session) => session.address === selectedWalletAddressState);
+    if (stillKnown) return;
+
+    const fallback = walletSessions[0]?.address || null;
+    setSelectedWalletAddress(fallback);
+    setSelectedWalletAddressState(fallback);
+  }, [currentAddress, selectedWalletAddressState, walletSessions]);
+
+  const activeWorkspaceWallet = currentAddress || selectedWalletAddressState;
+  const filteredVaultCatalog = useMemo(() => {
+    if (!activeWorkspaceWallet) return vaultCatalog;
+
+    const scoped = vaultCatalog.filter(
+      (item) =>
+        item.funderWallet === activeWorkspaceWallet ||
+        item.beneficiaryWallet === activeWorkspaceWallet ||
+        item.payoutWallet === activeWorkspaceWallet
+    );
+
+    return scoped.length ? scoped : vaultCatalog;
+  }, [activeWorkspaceWallet, vaultCatalog]);
+
+  const currentWalletLastVault = getLastVaultAddress(activeWorkspaceWallet);
+  const lastVaultAddress = currentWalletLastVault || getLastVaultAddress() || filteredVaultCatalog[0]?.vaultAddress;
 
   const recentWallets = useMemo(() => walletSessions.slice(0, 4), [walletSessions]);
   const readyWalletApps = useMemo(
-    () =>
-      wallets
-        .filter(({ readyState }) => String(readyState).toLowerCase() !== "unsupported")
-        .slice(0, 4),
+    () => {
+      const unique = new Map<string, { entry: (typeof wallets)[number]; label: string }>();
+
+      wallets.forEach((walletEntry) => {
+        const walletName = walletEntry.adapter.name.trim();
+        const supported = resolveSupportedWalletApp(walletName);
+        if (!supported) return;
+        if (String(walletEntry.readyState).toLowerCase() === "unsupported") return;
+        if (!unique.has(supported.key)) unique.set(supported.key, { entry: walletEntry, label: supported.label });
+      });
+
+      return Array.from(unique.values()).slice(0, 3);
+    },
     [wallets]
   );
 
@@ -92,7 +159,7 @@ export default function ConsoleDashboard() {
                 </Link>
               )}
               <Link to="/create" className="btn btn-primary">
-                <ShieldIcon className="icon-svg icon-svg-sm" />
+                <PlusIcon className="icon-svg icon-svg-sm" />
                 {t("console.cta")}
               </Link>
             </>
@@ -105,8 +172,10 @@ export default function ConsoleDashboard() {
       <section className="vault-command-ribbon">
         <div className="surface-card command-ribbon-card command-ribbon-card-accent">
           <span className="surface-kicker">{t("console.metrics.walletNow")}</span>
-          <strong>{connected ? shortKey(currentAddress, t("shell.walletIdle")) : t("shell.walletIdle")}</strong>
-          <p>{connected ? t("console.metrics.walletNowText") : t("console.metrics.walletIdleText")}</p>
+          <strong>
+            {activeWorkspaceWallet ? shortKey(activeWorkspaceWallet, t("shell.walletIdle")) : t("shell.walletIdle")}
+          </strong>
+          <p>{activeWorkspaceWallet ? t("console.metrics.walletNowText") : t("console.metrics.walletIdleText")}</p>
         </div>
         <div className="surface-card command-ribbon-card">
           <span className="surface-kicker">{t("console.metrics.sessions")}</span>
@@ -161,10 +230,34 @@ export default function ConsoleDashboard() {
               <span className="surface-kicker">{t("console.blocks.wallets")}</span>
               <h3>{t("console.blocks.walletsTitle")}</h3>
               <p>{t("console.blocks.walletsText")}</p>
+              <div className="field-block field-block-compact">
+                <label className="field-label" htmlFor="workspace-wallet">{t("console.workspaceWallet")}</label>
+                <select
+                  id="workspace-wallet"
+                  className="premium-input"
+                  value={activeWorkspaceWallet || ""}
+                  onChange={(e) => {
+                    const value = e.target.value || null;
+                    setSelectedWalletAddress(value);
+                    setSelectedWalletAddressState(value);
+                  }}
+                >
+                  <option value="">{t("console.workspaceWalletAuto")}</option>
+                  {recentWallets.map((session) => (
+                    <option key={session.address} value={session.address}>
+                      {`${session.walletName || t("wallet.providerUnknown")} · ${shortKey(session.address, session.address)}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="console-card-list">
                 <div className="console-card-row">
                   <span>{t("console.blocks.currentWallet")}</span>
-                  <strong>{connected ? shortKey(currentAddress, t("common.notAvailable")) : t("shell.walletIdle")}</strong>
+                  <strong>
+                    {activeWorkspaceWallet
+                      ? shortKey(activeWorkspaceWallet, t("common.notAvailable"))
+                      : t("shell.walletIdle")}
+                  </strong>
                 </div>
                 <div className="console-card-row">
                   <span>{t("console.blocks.savedWallets")}</span>
@@ -206,6 +299,49 @@ export default function ConsoleDashboard() {
                 </div>
               </div>
             </article>
+
+            <article className="surface-card feature-surface console-ops-card">
+              <span className="surface-kicker">{t("console.walletKicker")}</span>
+              <h3>{t("console.walletsTitle")}</h3>
+              <div className="identity-list console-identity-list">
+                <div className="identity-row">
+                  <span className="identity-title">{t("console.walletStatus")}</span>
+                  <strong>{connected ? t("shell.walletOnline") : t("shell.walletIdle")}</strong>
+                </div>
+                <div className="identity-row">
+                  <span className="identity-title">{t("console.walletProvider")}</span>
+                  <strong>{wallet?.adapter.name || t("common.notAvailable")}</strong>
+                </div>
+                <div className="identity-row">
+                  <span className="identity-title">{t("console.walletAddress")}</span>
+                  <strong>{shortKey(currentAddress, t("common.notAvailable"))}</strong>
+                </div>
+                <div className="identity-row">
+                  <span className="identity-title">{t("console.network")}</span>
+                  <strong>{t("wallet.networkValue")}</strong>
+                </div>
+              </div>
+              <div className="wallet-app-pill-row">
+                {readyWalletApps.length ? (
+                  readyWalletApps.map(({ entry, label }) => {
+                    const isCurrent = wallet?.adapter.name === entry.adapter.name;
+
+                    return (
+                      <span key={label} className={`wallet-app-pill ${isCurrent ? "active" : ""}`}>
+                        {entry.adapter.icon ? (
+                          <img src={entry.adapter.icon} alt={label} className="wallet-provider-icon wallet-provider-icon-small" />
+                        ) : (
+                          <WalletIcon className="icon-svg icon-svg-sm" />
+                        )}
+                        {label}
+                      </span>
+                    );
+                  })
+                ) : (
+                  <div className="console-inline-note">{t("console.appsEmpty")}</div>
+                )}
+              </div>
+            </article>
           </section>
         </div>
 
@@ -228,17 +364,17 @@ export default function ConsoleDashboard() {
                   {t("console.catalogRetry")}
                 </button>
               </div>
-            ) : vaultCatalog.length ? (
+            ) : filteredVaultCatalog.length ? (
               <div className="session-stack">
-                {vaultCatalog.slice(0, 4).map((item) => (
+                {filteredVaultCatalog.slice(0, 2).map((item) => (
                   <article key={item.vaultAddress} className="wallet-session-card">
                     <div className="wallet-session-head">
                       <div className="wallet-session-title">
-                        <ShieldIcon className="icon-svg icon-svg-sm" />
+                        <WalletIcon className="icon-svg icon-svg-sm" />
                         <div>
-                            <strong>{shortKey(item.vaultAddress, item.vaultAddress)}</strong>
-                            <span>{getVaultModeLabel(item.mode)}</span>
-                          </div>
+                          <strong>{shortKey(item.vaultAddress, item.vaultAddress)}</strong>
+                          <span>{item.projectName || getVaultModeLabel(item.mode)}</span>
+                        </div>
                       </div>
                       <span className="status-pill status-pill-muted status-pill-inline">
                         {item.analytics.pendingRequests}
@@ -246,6 +382,16 @@ export default function ConsoleDashboard() {
                     </div>
 
                     <div className="console-card-list wallet-session-meta">
+                      <div className="console-card-row">
+                        <span>{t("console.catalogRoleWallet")}</span>
+                        <strong>
+                          {activeWorkspaceWallet && item.funderWallet === activeWorkspaceWallet
+                            ? t("vault.role.funder")
+                            : activeWorkspaceWallet && item.beneficiaryWallet === activeWorkspaceWallet
+                              ? t("vault.role.beneficiary")
+                              : t("vault.role.observer")}
+                        </strong>
+                      </div>
                       <div className="console-card-row">
                         <span>{t("console.catalogRequests")}</span>
                         <strong>{item.analytics.totalRequests}</strong>
@@ -269,28 +415,6 @@ export default function ConsoleDashboard() {
           </div>
 
           <div className="surface-card summary-panel">
-            <span className="surface-kicker">{t("console.walletKicker")}</span>
-            <div className="identity-list">
-              <div className="identity-row">
-                <span className="identity-title">{t("console.walletStatus")}</span>
-                <strong>{connected ? t("shell.walletOnline") : t("shell.walletIdle")}</strong>
-              </div>
-              <div className="identity-row">
-                <span className="identity-title">{t("console.walletProvider")}</span>
-                <strong>{wallet?.adapter.name || t("common.notAvailable")}</strong>
-              </div>
-              <div className="identity-row">
-                <span className="identity-title">{t("console.walletAddress")}</span>
-                <strong>{shortKey(currentAddress, t("common.notAvailable"))}</strong>
-              </div>
-              <div className="identity-row">
-                <span className="identity-title">{t("console.network")}</span>
-                <strong>{t("wallet.networkValue")}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="surface-card summary-panel">
             <div className="panel-topline panel-topline-compact">
               <div>
                 <span className="surface-kicker">{t("console.sessionsKicker")}</span>
@@ -300,7 +424,7 @@ export default function ConsoleDashboard() {
 
             {recentWallets.length ? (
               <div className="session-stack">
-                {recentWallets.map((session) => {
+                {recentWallets.slice(0, 1).map((session) => {
                   const isCurrent = currentAddress === session.address;
 
                   return (
@@ -346,36 +470,6 @@ export default function ConsoleDashboard() {
             ) : (
               <div className="console-inline-note">{t("console.sessionsEmpty")}</div>
             )}
-          </div>
-
-          <div className="surface-card summary-panel summary-panel-dark">
-            <span className="surface-kicker">{t("console.appsKicker")}</span>
-            <div className="flow-list">
-              {readyWalletApps.length ? (
-                readyWalletApps.map(({ adapter }, index) => {
-                  const isCurrent = wallet?.adapter.name === adapter.name;
-
-                  return (
-                    <div key={`${adapter.name}-${index}`} className="flow-item wallet-app-row">
-                      <strong>
-                        {adapter.icon ? (
-                          <img src={adapter.icon} alt={adapter.name} className="wallet-provider-icon wallet-provider-icon-small" />
-                        ) : (
-                          <WalletIcon className="icon-svg icon-svg-sm" />
-                        )}
-                      </strong>
-                      <div>
-                        <h4>{adapter.name}</h4>
-                        <p>{isCurrent ? t("console.appSelected") : t("console.appDetected")}</p>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="console-inline-note console-inline-note-dark">{t("console.appsEmpty")}</div>
-              )}
-            </div>
-            <p className="muted-copy console-hint">{t("console.appsHint")}</p>
           </div>
         </aside>
       </section>

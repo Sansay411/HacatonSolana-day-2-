@@ -6,7 +6,15 @@
 export interface CreateVaultRequest {
   vaultAddress: string;
   name?: string;
+  projectName?: string;
+  purposeType?: "startup" | "grant" | "infra" | "public_project";
   description?: string;
+  allowedCategories?: string[];
+  funderWallet?: string;
+  beneficiaryWallet?: string;
+  payoutWallet?: string;
+  mode?: "startup" | "grant" | "freelancer";
+  dailyLimitLamports?: number;
 }
 
 /** POST /api/spend-requests — submit description to backend */
@@ -29,9 +37,14 @@ export interface SpendRequestAIEvaluation {
   provider: string | null;
   status: "available" | "unavailable" | "in_progress";
   recommendation: "approve" | "reject" | null;
+  decisionHint?: "approve" | "review" | "reject" | null;
   riskScore: number | null;
+  effectiveRisk?: number | null;
+  trustScore?: number | null;
   riskLevel: "low" | "medium" | "high" | null;
   findings: string[];
+  explanation?: string | null;
+  behaviorFlags?: string[];
   flags: AIDecisionFlags | null;
   riskSource: "gemini" | "fallback_engine" | null;
   attempted: boolean;
@@ -136,6 +149,35 @@ export interface VaultWalletSummary {
   trustScore: number;
   trustLevel: "stable" | "warning" | "high_risk";
   protectedAmountLamports: number;
+  successfulRequests?: number;
+  rejectedRequests?: number;
+  cooldownViolations?: number;
+}
+
+export interface VaultCatalogItem {
+  vaultAddress: string;
+  name: string | null;
+  projectName: string | null;
+  purposeType: "startup" | "grant" | "infra" | "public_project";
+  description: string | null;
+  allowedCategories: string[];
+  funderWallet: string | null;
+  beneficiaryWallet: string | null;
+  payoutWallet: string | null;
+  mode: "startup" | "grant" | "freelancer";
+  dailyLimitLamports: number;
+  emergencyStopEnabled: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  analytics: {
+    totalRequests: number;
+    approvedRequests: number;
+    rejectedRequests: number;
+    pendingRequests: number;
+    protectedFundsLamports: number;
+    totalRequestedLamports: number;
+    approvalRate: number;
+  };
 }
 
 export interface WalletTrustSummary {
@@ -143,6 +185,11 @@ export interface WalletTrustSummary {
   level: "stable" | "warning" | "high_risk";
   lastUpdatedAt: string | null;
   reasons: string[];
+  successfulRequests?: number;
+  rejectedRequests?: number;
+  cooldownViolations?: number;
+  lowRiskRequests?: number;
+  stabilityRewards?: number;
 }
 
 export interface WalletMonitoringSummary {
@@ -170,4 +217,12 @@ export interface WalletChronologyResponse {
   trust: WalletTrustSummary;
   monitoring: WalletMonitoringSummary;
   events: WalletChronologyEvent[];
+  nextCursor?: string | null;
+}
+
+export interface WalletHistoryResponse {
+  walletAddress: string;
+  vaultAddress: string | null;
+  items: WalletChronologyEvent[];
+  nextCursor: string | null;
 }

@@ -15,7 +15,8 @@
     "cors": "^2.8.5",
     "better-sqlite3": "^12.8.0",
     "dotenv": "^16.4.0",
-    "bs58": "^5.0.0"
+    "bs58": "^5.0.0",
+    "firebase-admin": "^13.7.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.0",

@@ -1,5 +1,11 @@
 export type AIDecision = "approve" | "reject";
 export type AIDecisionSource = "gemini" | "fallback";
+export type AIDecisionHint = "approve" | "review" | "reject";
+export type AIBehaviorFlag =
+  | "high_frequency"
+  | "repeat_after_reject"
+  | "category_mismatch"
+  | "suspicious_pattern";
 
 export interface AIRequestHistoryItem {
   amount: number;
@@ -35,19 +41,33 @@ export interface AIFlags {
 }
 
 export interface AIRequestInput {
-  amount: number;
-  purpose: string;
-  timestamp: number;
+  request: {
+    amount: number;
+    description: string;
+    timestamp: number;
+  };
+  vault: {
+    purposeType: "startup" | "grant" | "infra" | "public_project" | "unknown";
+    allowedCategories: string[];
+    limits: AIVaultPolicy;
+  };
+  behavior: {
+    lastRequests: AIRequestHistoryItem[];
+    rejectCount: number;
+    requestFrequency: number;
+    timeSinceLastRequest: number | null;
+    flags: AIBehaviorFlag[];
+  };
+  trustScore: number;
   walletAddress: string;
-  requestHistory: AIRequestHistoryItem[];
-  vaultPolicy: AIVaultPolicy;
 }
 
 export interface AIParsedOutput {
   risk_score: number;
-  decision: AIDecision;
-  reasons: string[];
-  flags: AIFlags;
+  decision_hint: AIDecisionHint;
+  reasons?: string[];
+  flags: AIBehaviorFlag[];
+  explanation: string;
   category?: string;
   behavioral_patterns?: string[];
 }
@@ -55,9 +75,12 @@ export interface AIParsedOutput {
 export interface AIProviderResult {
   provider: string;
   decision: AIDecision;
+  decisionHint: AIDecisionHint;
   riskScore: number;
   reasons: string[];
+  explanation: string;
   flags: AIFlags;
+  behavioralFlags: AIBehaviorFlag[];
   category: string | null;
   behavioralPatterns: string[];
   inputPayload: string;
@@ -87,6 +110,12 @@ export function sanitizeReasons(reasons: unknown): string[] {
     .slice(0, 4);
 
   return normalized.length > 0 ? normalized : ["No structured reasoning provided"];
+}
+
+export function sanitizeExplanation(value: unknown) {
+  if (typeof value !== "string") return "No explanation provided";
+  const normalized = value.trim().replace(/\s+/g, " ").slice(0, 240);
+  return normalized || "No explanation provided";
 }
 
 export function sanitizeCategory(value: unknown) {
@@ -123,6 +152,37 @@ export function sanitizeFlags(flags: unknown): AIFlags {
     suspicious_pattern: Boolean(value.suspicious_pattern),
     policy_violation: Boolean(value.policy_violation),
   };
+}
+
+export function sanitizeBehaviorFlags(flags: unknown): AIBehaviorFlag[] {
+  if (!Array.isArray(flags)) return [];
+
+  const seen = new Set<AIBehaviorFlag>();
+  const result: AIBehaviorFlag[] = [];
+
+  for (const item of flags) {
+    if (
+      item === "high_frequency" ||
+      item === "repeat_after_reject" ||
+      item === "category_mismatch" ||
+      item === "suspicious_pattern"
+    ) {
+      if (!seen.has(item)) {
+        seen.add(item);
+        result.push(item);
+      }
+    }
+  }
+
+  return result;
+}
+
+export function normalizeDecisionHint(value: string | undefined | null): AIDecisionHint | null {
+  if (!value) return null;
+  if (value === "approve") return "approve";
+  if (value === "review") return "review";
+  if (value === "reject") return "reject";
+  return null;
 }
 
 export function normalizeDecision(value: string | undefined | null): AIDecision | null {

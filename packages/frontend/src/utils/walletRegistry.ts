@@ -9,6 +9,7 @@ export interface WalletSessionRecord {
 }
 
 const WALLET_REGISTRY_STORAGE_KEY = "aegis-wallet-registry";
+const WALLET_SELECTED_STORAGE_KEY = "aegis-selected-wallet";
 const MAX_WALLET_RECORDS = 6;
 
 function canUseStorage() {
@@ -47,6 +48,20 @@ export function getWalletSessions() {
   return sortRecords(readWalletRegistry());
 }
 
+export function getSelectedWalletAddress() {
+  if (!canUseStorage()) return null;
+  return window.localStorage.getItem(WALLET_SELECTED_STORAGE_KEY);
+}
+
+export function setSelectedWalletAddress(address?: string | null) {
+  if (!canUseStorage()) return;
+  if (!address) {
+    window.localStorage.removeItem(WALLET_SELECTED_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(WALLET_SELECTED_STORAGE_KEY, address);
+}
+
 export function upsertWalletSession(input: {
   address: string;
   walletName?: string;
@@ -79,6 +94,7 @@ export function upsertWalletSession(input: {
   }
 
   writeWalletRegistry(records);
+  setSelectedWalletAddress(input.address);
   return getWalletSessions();
 }
 

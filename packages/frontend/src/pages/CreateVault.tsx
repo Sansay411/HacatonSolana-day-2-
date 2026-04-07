@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
 import AppShell from "../components/AppShell";
-import { CheckCircleIcon, GridIcon, ShieldIcon, AlertCircleIcon } from "../components/Icons";
+import { CheckCircleIcon, GridIcon, PlusIcon, AlertCircleIcon } from "../components/Icons";
 import { useVaultActions } from "../hooks/useVaultActions";
 import { useI18n } from "../i18n";
 import { apiFetch } from "../lib/api";
@@ -12,6 +12,33 @@ function shortKey(key?: string | null, fallback?: string) {
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
 
+const CATEGORY_OPTIONS = [
+  "operations",
+  "infra",
+  "payroll",
+  "growth",
+  "grants",
+  "marketing",
+  "research",
+  "community",
+] as const;
+
+type AllowedCategory = (typeof CATEGORY_OPTIONS)[number];
+
+function getDefaultCategories(purposeType: "startup" | "grant" | "infra" | "public_project"): AllowedCategory[] {
+  switch (purposeType) {
+    case "grant":
+      return ["grants", "research", "community"];
+    case "infra":
+      return ["infra", "operations", "research"];
+    case "public_project":
+      return ["community", "research", "marketing"];
+    case "startup":
+    default:
+      return ["operations", "infra", "payroll"];
+  }
+}
+
 export default function CreateVault() {
   const { publicKey } = useWallet();
   const navigate = useNavigate();
@@ -19,6 +46,12 @@ export default function CreateVault() {
   const { t } = useI18n();
 
   const [beneficiary, setBeneficiary] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [purposeType, setPurposeType] = useState<"startup" | "grant" | "infra" | "public_project">("startup");
+  const [description, setDescription] = useState("");
+  const [allowedCategories, setAllowedCategories] = useState<AllowedCategory[]>(() =>
+    getDefaultCategories("startup")
+  );
   const [depositAmount, setDepositAmount] = useState("5");
   const [perTxLimit, setPerTxLimit] = useState("1");
   const [totalLimit, setTotalLimit] = useState("10");
@@ -65,6 +98,10 @@ export default function CreateVault() {
     };
   }, []);
 
+  useEffect(() => {
+    setAllowedCategories(getDefaultCategories(purposeType));
+  }, [purposeType]);
+
   const depositValue = parseFloat(depositAmount) || 0;
   const perTxValue = parseFloat(perTxLimit) || 0;
   const totalLimitValue = parseFloat(totalLimit) || 0;
@@ -80,6 +117,8 @@ export default function CreateVault() {
     ],
     [cooldownValue, depositValue, perTxValue, totalLimitValue, t]
   );
+  const depositRatio = totalLimitValue > 0 ? Math.max(0, (depositValue / totalLimitValue) * 100) : 0;
+  const requestRatio = totalLimitValue > 0 ? Math.max(0, (perTxValue / totalLimitValue) * 100) : 0;
 
   const handleCreate = async () => {
     const beneficiaryAddress = beneficiary.trim();
@@ -108,9 +147,15 @@ export default function CreateVault() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             vaultAddress: result.vaultAddress,
-            name: null,
-            description: null,
-            mode: "startup",
+            name: projectName.trim() || null,
+            projectName: projectName.trim() || null,
+            purposeType,
+            description: description.trim() || null,
+            allowedCategories,
+            funderWallet: publicKey.toBase58(),
+            beneficiaryWallet: beneficiaryAddress,
+            payoutWallet: beneficiaryAddress,
+            mode: purposeType === "grant" ? "grant" : "startup",
             dailyLimitLamports: 0,
             allowedTimeWindows: [],
             categoryRules: [],
@@ -173,6 +218,77 @@ export default function CreateVault() {
                 <h2>{t("create.configTitle")}</h2>
               </div>
               <span className="status-pill status-pill-success">{t("create.ready")}</span>
+            </div>
+
+            <div className="field-block">
+              <label className="field-label" htmlFor="project-name">{t("create.projectName")}</label>
+              <input
+                id="project-name"
+                className="premium-input"
+                type="text"
+                placeholder={t("create.projectNamePlaceholder")}
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+              />
+            </div>
+
+            <div className="workspace-two-up create-config-row">
+              <div className="field-block">
+                <label className="field-label" htmlFor="purpose-type">{t("create.purposeType")}</label>
+                <select
+                  id="purpose-type"
+                  className="premium-input"
+                  value={purposeType}
+                  onChange={(e) =>
+                    setPurposeType(e.target.value as "startup" | "grant" | "infra" | "public_project")
+                  }
+                >
+                  <option value="startup">{t("create.purposeType.startup")}</option>
+                  <option value="grant">{t("create.purposeType.grant")}</option>
+                  <option value="infra">{t("create.purposeType.infra")}</option>
+                  <option value="public_project">{t("create.purposeType.publicProject")}</option>
+                </select>
+              </div>
+
+              <div className="field-block">
+                <label className="field-label">{t("create.allowedCategories")}</label>
+                <div className="category-picker" role="group" aria-label={t("create.allowedCategories")}>
+                  {CATEGORY_OPTIONS.map((category) => {
+                    const active = allowedCategories.includes(category);
+
+                    return (
+                      <button
+                        key={category}
+                        type="button"
+                        className={`category-chip ${active ? "active" : ""}`}
+                        onClick={() =>
+                          setAllowedCategories((current) =>
+                            current.includes(category)
+                              ? current.filter((item) => item !== category)
+                              : [...current, category]
+                          )
+                        }
+                      >
+                        {t(`create.category.${category}`)}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="field-hint">{t("create.allowedCategoriesHint")}</p>
+              </div>
+            </div>
+
+            <div className="field-block">
+              <label className="field-label" htmlFor="project-description">{t("create.projectDescription")}</label>
+              <textarea
+                id="project-description"
+                className="premium-input premium-textarea"
+                rows={4}
+                placeholder={t("create.projectDescriptionPlaceholder")}
+                value={description}
+                onChange={(e) => setDescription(e.target.value.slice(0, 300))}
+              />
+              <p className="field-hint">{t("create.projectDescriptionHint")}</p>
             </div>
 
             <div className="field-block">
@@ -285,14 +401,14 @@ export default function CreateVault() {
                 disabled={!publicKey || !beneficiary || pending || Boolean(runtime && !runtime.riskAuthority.ready)}
                 id="btn-create-vault"
               >
-                <ShieldIcon className="icon-svg icon-svg-sm" />
+                <PlusIcon className="icon-svg icon-svg-sm" />
                 {pending ? t("create.deploying") : t("create.createButton")}
               </button>
             </div>
           </div>
 
           <div className="workspace-two-up workspace-secondary-grid">
-            <div className="surface-card summary-panel summary-panel-dark">
+            <div className="surface-card summary-panel summary-panel-dark create-flow-panel">
               <span className="surface-kicker">{t("create.flowKicker")}</span>
               <div className="flow-list">
                 <div className="flow-item">
@@ -319,18 +435,35 @@ export default function CreateVault() {
               </div>
             </div>
 
-            <div className="surface-card summary-panel">
+            <div className="surface-card summary-panel create-intent-panel">
               <span className="surface-kicker">{t("create.intentKicker")}</span>
-              <div className="identity-list">
-                <div className="identity-row">
+              <div className="create-intent-grid">
+                <div className="create-intent-metric">
                   <span className="identity-title">{t("create.intent.depositRatio")}</span>
-                  <strong>{totalLimitValue > 0 ? `${((depositValue / totalLimitValue) * 100).toFixed(0)}%` : "0%"}</strong>
+                  <strong>{`${depositRatio.toFixed(0)}%`}</strong>
+                  <p>{`${depositValue.toFixed(2)} SOL ${t("create.intent.ofProgramCap")} ${totalLimitValue.toFixed(2)} SOL`}</p>
                 </div>
-                <div className="identity-row">
+                <div className="create-intent-metric">
                   <span className="identity-title">{t("create.intent.requestRatio")}</span>
-                  <strong>{totalLimitValue > 0 ? `${((perTxValue / totalLimitValue) * 100).toFixed(0)}%` : "0%"}</strong>
+                  <strong>{`${requestRatio.toFixed(0)}%`}</strong>
+                  <p>{`${perTxValue.toFixed(2)} SOL ${t("create.intent.maxSingleRequest")}`}</p>
                 </div>
               </div>
+              <div className="console-card-list create-intent-list">
+                <div className="console-card-row">
+                  <span>{t("create.intent.availableRequests")}</span>
+                  <strong>{perTxValue > 0 ? Math.max(1, Math.floor(totalLimitValue / perTxValue)) : 0}</strong>
+                </div>
+                <div className="console-card-row">
+                  <span>{t("create.intent.riskPolicy")}</span>
+                  <strong>{`${riskValue}/100`}</strong>
+                </div>
+                <div className="console-card-row">
+                  <span>{t("create.intent.cooldownPolicy")}</span>
+                  <strong>{`${cooldownValue}s`}</strong>
+                </div>
+              </div>
+              <p className="console-inline-note">{t("create.intent.note")}</p>
             </div>
           </div>
         </div>

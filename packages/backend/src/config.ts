@@ -18,6 +18,12 @@ export const config = {
     timeoutMs: parseInt(process.env.AI_TIMEOUT_MS || "3000", 10),
     model: process.env.GEMINI_MODEL || "gemini-1.5-flash",
   },
+  firebase: {
+    projectId: process.env.FIREBASE_PROJECT_ID || "",
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
+    privateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+    requireVerifiedAuth: process.env.FIREBASE_REQUIRE_AUTH === "true",
+  },
   risk: {
     /** Auto-approve below this score */
     approveThreshold: 50,

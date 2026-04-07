@@ -6,6 +6,7 @@
   ],
   "scripts": {
     "test": "anchor test",
+    "test:unit": "npx tsx --test packages/frontend/src/**/*.test.ts packages/backend/src/**/*.test.ts",
     "build": "anchor build",
     "dev:backend": "npm run dev --workspace=packages/backend",
     "dev:frontend": "npm run dev --workspace=packages/frontend"
