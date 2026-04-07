@@ -56,7 +56,7 @@ function extractSimulationMessage(
  */
 export function useVaultActions() {
   const program = useAegisProgram();
-  const { publicKey, sendTransaction, signTransaction } = useWallet();
+  const { publicKey, sendTransaction, signTransaction, wallet } = useWallet();
   const { connection } = useConnection();
   const [pending, setPending] = useState(false);
   const { t } = useI18n();
@@ -68,46 +68,77 @@ export function useVaultActions() {
       }
 
       try {
-        const latestBlockhash = await connection.getLatestBlockhash("confirmed");
-        transaction.feePayer = publicKey;
-        transaction.recentBlockhash = latestBlockhash.blockhash;
-        let signature: string;
+        const adapterName = wallet?.adapter?.name?.toLowerCase() || "";
+        const preferSignFlow =
+          adapterName.includes("phantom") ||
+          adapterName.includes("solflare") ||
+          adapterName.includes("backpack");
 
-        if (signTransaction) {
-          try {
-            const signedTransaction = await signTransaction(transaction);
-            signature = await connection.sendRawTransaction(
-              signedTransaction.serialize(),
-              {
-                preflightCommitment: "confirmed",
-                skipPreflight: false,
-              }
-            );
-          } catch (walletSignError: any) {
-            const message =
-              typeof walletSignError?.message === "string"
-                ? walletSignError.message
-                : "";
+        const prepareTransaction = async () => {
+          const latestBlockhash = await connection.getLatestBlockhash("confirmed");
+          transaction.feePayer = publicKey;
+          transaction.recentBlockhash = latestBlockhash.blockhash;
+          return latestBlockhash;
+        };
 
-            if (message.includes("User rejected")) {
-              throw walletSignError;
-            }
-
-            if (message.includes("Unexpected error") && sendTransaction) {
-              signature = await sendTransaction(transaction, connection, {
-                preflightCommitment: "confirmed",
-                skipPreflight: false,
-              });
-            } else {
-              throw walletSignError;
-            }
+        const sendWithSignTransaction = async () => {
+          if (!signTransaction) {
+            throw new Error("Wallet signTransaction is not available");
           }
-        } else {
-          signature = await sendTransaction(transaction, connection, {
+          const signedTransaction = await signTransaction(transaction);
+          return connection.sendRawTransaction(signedTransaction.serialize(), {
             preflightCommitment: "confirmed",
             skipPreflight: false,
           });
+        };
+
+        const sendWithWalletAdapter = async () => {
+          if (!sendTransaction) {
+            throw new Error("Wallet sendTransaction is not available");
+          }
+          return sendTransaction(transaction, connection, {
+            preflightCommitment: "confirmed",
+            skipPreflight: false,
+          });
+        };
+
+        const tryPrimaryAndFallback = async () => {
+          const primary = preferSignFlow ? sendWithSignTransaction : sendWithWalletAdapter;
+          const secondary = preferSignFlow ? sendWithWalletAdapter : sendWithSignTransaction;
+
+          try {
+            return await primary();
+          } catch (primaryError: any) {
+            const message =
+              typeof primaryError?.message === "string" ? primaryError.message : "";
+
+            if (message.includes("User rejected")) {
+              throw primaryError;
+            }
+
+            if (!message.includes("Unexpected error")) {
+              throw primaryError;
+            }
+
+            await prepareTransaction();
+            return secondary();
+          }
+        };
+
+        const latestBlockhash = await prepareTransaction();
+        const simulation = await connection.simulateTransaction(transaction);
+
+        if (simulation.value.err) {
+          return {
+            success: false,
+            error: extractSimulationMessage(
+              simulation.value.logs,
+              t("actions.simulationFailed")
+            ),
+          };
         }
+
+        const signature = await tryPrimaryAndFallback();
 
         await connection.confirmTransaction(
           {
@@ -150,7 +181,7 @@ export function useVaultActions() {
         };
       }
     },
-    [connection, publicKey, sendTransaction, signTransaction, t]
+    [connection, publicKey, sendTransaction, signTransaction, t, wallet]
   );
 
   // ── CREATE VAULT + DEPOSIT ─────────────────────────

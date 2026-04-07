@@ -8,8 +8,8 @@ export interface WalletSessionRecord {
   lastVaultAddress?: string;
 }
 
-const WALLET_REGISTRY_STORAGE_KEY = "aegis-wallet-registry-v4";
-const WALLET_SELECTED_STORAGE_KEY = "aegis-selected-wallet-v4";
+const WALLET_REGISTRY_STORAGE_KEY = "aegis-wallet-registry-v5";
+const WALLET_SELECTED_STORAGE_KEY = "aegis-selected-wallet-v5";
 const MAX_WALLET_RECORDS = 6;
 
 function canUseStorage() {

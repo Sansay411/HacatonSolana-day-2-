@@ -105,7 +105,7 @@ function formatAbsoluteTime(unixSeconds: number, locale: string, fallback: strin
 }
 
 function monitoringStorageKey(kind: "tab" | "wallet", vaultAddress?: string) {
-  return vaultAddress ? `aegis-vault-v2-${kind}:${vaultAddress}` : null;
+  return vaultAddress ? `aegis-vault-v3-${kind}:${vaultAddress}` : null;
 }
 
 function readStoredMonitoringValue(kind: "tab" | "wallet", vaultAddress?: string) {
@@ -379,6 +379,8 @@ function RequestCard({
     }
 
     let active = true;
+    let intervalId: number | null = null;
+    let missingCount = 0;
 
     const loadDetail = async () => {
       try {
@@ -386,12 +388,28 @@ function RequestCard({
         if (!response.ok) {
           if (response.status === 404 && active) {
             setDetail(null);
+            setDetailLoading(false);
+            missingCount += 1;
+            if (missingCount >= 1 && intervalId) {
+              window.clearInterval(intervalId);
+              intervalId = null;
+            }
           }
           return;
         }
+        missingCount = 0;
         const data = (await response.json()) as SpendRequestApiDetail;
         if (active) {
           setDetail(data);
+          const isResolvedStatus =
+            data.processingStatus === "completed" || data.processingStatus === "failed";
+          const isResolvedDecision =
+            data.finalDecisionSummary?.decision === "approved" ||
+            data.finalDecisionSummary?.decision === "rejected";
+          if ((isResolvedStatus || isResolvedDecision) && intervalId) {
+            window.clearInterval(intervalId);
+            intervalId = null;
+          }
         }
       } catch {
         if (active) {
@@ -405,11 +423,13 @@ function RequestCard({
     };
 
     loadDetail();
-    const interval = window.setInterval(loadDetail, 2500);
+    intervalId = window.setInterval(loadDetail, 2500);
 
     return () => {
       active = false;
-      window.clearInterval(interval);
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
     };
   }, [req.address]);
 

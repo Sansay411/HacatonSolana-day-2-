@@ -111,8 +111,6 @@ function buildUserPrompt(input: AIRequestInput, sanitizedPurpose: string) {
       timestamp: input.request.timestamp,
     },
     vault: {
-      purpose_type: input.vault.purposeType,
-      allowed_categories: input.vault.allowedCategories,
       limits: {
         max_per_tx: limits.maxPerTx,
         daily_limit: dailyLimitLine,
@@ -157,20 +155,6 @@ Behavioral context:
 * Time since last request: ${input.behavior.timeSinceLastRequest ?? "n/a"} seconds
 * Pre-detected flags: ${input.behavior.flags.join(", ") || "none"}
 * Trust score: ${input.trustScore}
-
-Allowed time windows:
-${(limits.allowedTimeWindows || [])
-  .map((window) => `- ${window.label}: ${window.startHour}:00-${window.endHour}:00`)
-  .join("\n") || "- no explicit time windows"}
-
-Category rules:
-${(limits.categoryRules || [])
-  .filter((rule) => rule.enabled)
-  .map(
-    (rule) =>
-      `- ${rule.label} (${rule.category}) | max ${rule.maxAmountSol.toFixed(2)} SOL | review ${rule.requiresReview ? "required" : "optional"}`
-  )
-  .join("\n") || "- no category rules"}
 
 Structured context JSON:
 ${JSON.stringify(aiContext, null, 2)}`;

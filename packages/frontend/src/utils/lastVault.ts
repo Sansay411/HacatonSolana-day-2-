@@ -1,7 +1,7 @@
 import { attachVaultToWallet } from "./walletRegistry";
 
-const LAST_VAULT_STORAGE_KEY = "aegis-last-vault-address-v4";
-const WALLET_VAULT_MAP_STORAGE_KEY = "aegis-wallet-vault-map-v4";
+const LAST_VAULT_STORAGE_KEY = "aegis-last-vault-address-v5";
+const WALLET_VAULT_MAP_STORAGE_KEY = "aegis-wallet-vault-map-v5";
 
 function readWalletVaultMap(): Record<string, string> {
   if (typeof window === "undefined") return {};

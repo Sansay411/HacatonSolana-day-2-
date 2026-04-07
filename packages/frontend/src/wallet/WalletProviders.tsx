@@ -11,7 +11,6 @@ import {
   TrustWalletAdapter,
 } from "@solana/wallet-adapter-wallets";
 import { clusterApiUrl } from "@solana/web3.js";
-import { useStandardWalletAdapters } from "@solana/wallet-standard-wallet-adapter-react";
 import type { WalletError } from "@solana/wallet-adapter-base";
 import { AlertCircleIcon } from "../components/Icons";
 import { SOLANA_NETWORK } from "../lib/solanaWallets";
@@ -90,11 +89,10 @@ export default function WalletProviders({ children }: WalletProvidersProps) {
     ],
     []
   );
-  const discoveredWallets = useStandardWalletAdapters(adapterWallets);
   const wallets = useMemo(() => {
     const seen = new Set<string>();
 
-    return discoveredWallets.filter((wallet) => {
+    return adapterWallets.filter((wallet) => {
       const normalizedName = wallet.name.trim().toLowerCase();
 
       if (!ALLOWED_WALLET_NAMES.has(normalizedName)) {
@@ -108,7 +106,7 @@ export default function WalletProviders({ children }: WalletProvidersProps) {
       seen.add(normalizedName);
       return true;
     });
-  }, [discoveredWallets]);
+  }, [adapterWallets]);
   const [walletError, setWalletError] = useState<string | null>(null);
 
   const handleWalletError = useCallback((error: WalletError) => {

@@ -32,7 +32,7 @@ interface AuthContextValue {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
-const AUTH_SNAPSHOT_KEY = "aegis-auth-snapshot-v2";
+const AUTH_SNAPSHOT_KEY = "aegis-auth-snapshot-v3";
 
 function readAuthSnapshot(): AuthIdentity | null {
   if (typeof window === "undefined") return null;

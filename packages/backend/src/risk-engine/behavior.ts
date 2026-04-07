@@ -153,7 +153,7 @@ export function buildBehavioralContext(input: BehavioralContextInput): Behaviora
   const requestsInWindow = input.history.filter((item) => input.now - item.createdAt <= 10 * 60);
   const rejectCount = input.history.filter((item) => item.decision === "rejected").length;
   const categoryMatch = detectCategoryMatch(input.description, input.allowedCategories);
-  const categoryMismatch = input.allowedCategories.length > 0 && !categoryMatch;
+  const categoryMismatch = false;
 
   const flags: AIBehaviorFlag[] = [];
 
@@ -163,10 +163,6 @@ export function buildBehavioralContext(input: BehavioralContextInput): Behaviora
 
   if (lastRequest?.decision === "rejected") {
     flags.push("repeat_after_reject");
-  }
-
-  if (categoryMismatch) {
-    flags.push("category_mismatch");
   }
 
   if (requestsInWindow.length >= 3 || rejectCount >= 2) {

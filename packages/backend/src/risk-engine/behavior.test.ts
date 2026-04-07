@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildBehavioralContext, computeBehavioralPenalty, explainBehavioralFlags } from "./behavior";
 
-test("behavioral analysis detects high frequency, repeat after reject, and category mismatch", () => {
+test("behavioral analysis detects high frequency, repeat after reject, and suspicious pattern", () => {
   const now = 1_000_000;
   const result = buildBehavioralContext({
     description: "office merch campaign",
@@ -42,13 +42,13 @@ test("behavioral analysis detects high frequency, repeat after reject, and categ
 
   assert.deepEqual(
     result.flags.sort(),
-    ["category_mismatch", "high_frequency", "repeat_after_reject", "suspicious_pattern"].sort()
+    ["high_frequency", "repeat_after_reject", "suspicious_pattern"].sort()
   );
-  assert.equal(computeBehavioralPenalty(result.flags), 40);
-  assert.ok(explainBehavioralFlags(result.flags).length >= 3);
+  assert.equal(computeBehavioralPenalty(result.flags), 30);
+  assert.ok(explainBehavioralFlags(result.flags).length >= 2);
 });
 
-test("russian hosting request matches infra category", () => {
+test("category matching remains informational and does not block requests", () => {
   const now = 1_715_000_000;
 
   const result = buildBehavioralContext({
