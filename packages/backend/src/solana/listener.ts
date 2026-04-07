@@ -269,7 +269,6 @@ async function pollPendingRequests() {
       continue;
     }
 
-    processedRequests.add(pubkey);
     console.log(`  [Listener] Processing pending SpendRequest: ${pubkey}`);
 
     updateSpendRequestProcessing({
@@ -289,6 +288,7 @@ async function pollPendingRequests() {
         status: "completed",
         error: null,
       });
+      processedRequests.add(pubkey);
     } catch (error: any) {
       const message = error?.message || "Failed to execute AI decision on-chain";
       updateSpendRequestProcessing({
@@ -305,6 +305,7 @@ async function pollPendingRequests() {
           source: "listener",
         },
       });
+      processedRequests.delete(pubkey);
       console.error(`  [Listener] Failed to process ${pubkey}:`, message);
     }
   }

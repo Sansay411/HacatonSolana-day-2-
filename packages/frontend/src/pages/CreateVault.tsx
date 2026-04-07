@@ -124,12 +124,6 @@ export default function CreateVault() {
     const beneficiaryAddress = beneficiary.trim();
     if (!publicKey || !beneficiaryAddress) return;
 
-    if (runtime && !runtime.riskAuthority.ready) {
-      setToast({ msg: t("create.executorNeedsAttention"), type: "error" });
-      setTimeout(() => setToast(null), 4000);
-      return;
-    }
-
     const result = await createVault({
       beneficiary: beneficiaryAddress,
       riskAuthority: effectiveRiskAuthority,
@@ -398,7 +392,7 @@ export default function CreateVault() {
               <button
                 className="btn btn-primary btn-xl"
                 onClick={handleCreate}
-                disabled={!publicKey || !beneficiary || pending || Boolean(runtime && !runtime.riskAuthority.ready)}
+                disabled={!publicKey || !beneficiary || pending}
                 id="btn-create-vault"
               >
                 <PlusIcon className="icon-svg icon-svg-sm" />

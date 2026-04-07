@@ -1025,21 +1025,36 @@ button {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+  align-items: stretch;
 }
 
 .feature-surface-soft {
   background: rgba(17, 24, 39, 0.02);
 }
 
-.feature-surface-dark {
-  background: #111827;
+.feature-surface.feature-surface-dark {
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(13, 19, 32, 0.98));
   color: #f7f7fb;
+  box-shadow: 0 14px 32px rgba(8, 15, 31, 0.14);
 }
 
-.feature-surface-dark .surface-kicker,
-.feature-surface-dark p,
-.feature-surface-dark li {
-  color: rgba(247, 247, 251, 0.78);
+.feature-surface.feature-surface-dark h3,
+.feature-surface.feature-surface-dark strong,
+.feature-surface.feature-surface-dark .landing-bullet-list,
+.feature-surface.feature-surface-dark .landing-bullet-list li {
+  color: #fff8ef;
+}
+
+.feature-surface.feature-surface-dark .surface-kicker {
+  color: rgba(247, 247, 251, 0.7) !important;
+}
+
+.feature-surface.feature-surface-dark p,
+.feature-surface.feature-surface-dark li,
+.feature-surface.feature-surface-dark span,
+.feature-surface.feature-surface-dark .landing-bullet-list,
+.feature-surface.feature-surface-dark .landing-bullet-list li {
+  color: rgba(255, 248, 239, 0.92) !important;
 }
 
 .landing-bullet-list {
@@ -1049,6 +1064,11 @@ button {
   gap: 10px;
   color: var(--text-secondary);
   line-height: 1.6;
+}
+
+.landing-compare-cards .feature-surface {
+  min-height: 0;
+  padding: 28px 30px;
 }
 
 .landing-properties-grid .feature-surface {
@@ -3370,6 +3390,41 @@ select.premium-input {
 }
 
 .wallet-app-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.wallet-app-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.05);
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.wallet-app-pill.active {
+  background: rgba(17, 24, 39, 0.1);
+  color: var(--text-primary);
+}
+
+.wallet-app-pill-button {
+  border: 0;
+  cursor: pointer;
+  transition: transform var(--transition-base), background var(--transition-base), color var(--transition-base);
+}
+
+.wallet-app-pill-button:hover {
+  transform: translateY(-1px);
+  background: rgba(17, 24, 39, 0.08);
+  color: var(--text-primary);
+}
+
+.console-actions-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;

@@ -21,15 +21,22 @@ function extractText(response: GeminiGenerateContentResponse) {
   );
 }
 
-export async function generateGeminiJson(params: {
+function isRetryableGeminiError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "AbortError" ||
+    /aborted/i.test(error.message) ||
+    /timeout/i.test(error.message) ||
+    /Gemini request failed \\(429\\)/i.test(error.message) ||
+    /Gemini request failed \\(5\\d\\d\\)/i.test(error.message)
+  );
+}
+
+async function requestGeminiOnce(params: {
   systemInstruction: string;
   userPrompt: string;
   schema: Record<string, unknown>;
 }) {
-  if (!config.ai.geminiApiKey) {
-    throw new Error("GEMINI_API_KEY is not configured");
-  }
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
 
@@ -76,5 +83,26 @@ export async function generateGeminiJson(params: {
     };
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+export async function generateGeminiJson(params: {
+  systemInstruction: string;
+  userPrompt: string;
+  schema: Record<string, unknown>;
+}) {
+  if (!config.ai.geminiApiKey) {
+    throw new Error("GEMINI_API_KEY is not configured");
+  }
+
+  try {
+    return await requestGeminiOnce(params);
+  } catch (error) {
+    if (!isRetryableGeminiError(error)) {
+      throw error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    return requestGeminiOnce(params);
   }
 }

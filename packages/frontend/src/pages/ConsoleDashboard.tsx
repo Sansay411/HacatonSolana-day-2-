@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import AppShell from "../components/AppShell";
 import WalletActionButton from "../components/WalletActionButton";
 import {
@@ -15,11 +16,13 @@ import { getLastVaultAddress } from "../utils/lastVault";
 import {
   getSelectedWalletAddress,
   getWalletSessions,
+  clearWalletSessions,
   setSelectedWalletAddress,
   upsertWalletSession,
   type WalletSessionRecord,
 } from "../utils/walletRegistry";
 import { useVaultCatalog } from "../hooks/useVaultCatalog";
+import { clearLastVaultState } from "../utils/lastVault";
 
 function shortKey(key?: string | null, fallback?: string) {
   if (!key) return fallback || "";
@@ -61,6 +64,7 @@ function formatWalletTime(locale: string, timestamp?: number | null) {
 
 export default function ConsoleDashboard() {
   const { connected, publicKey, wallet, wallets } = useWallet();
+  const { setVisible } = useWalletModal();
   const { t, locale } = useI18n();
   const {
     items: vaultCatalog,
@@ -139,6 +143,13 @@ export default function ConsoleDashboard() {
     },
     [wallets]
   );
+
+  const clearWorkspaceState = () => {
+    clearWalletSessions();
+    clearLastVaultState();
+    setWalletSessions([]);
+    setSelectedWalletAddressState(null);
+  };
 
   return (
     <AppShell>
@@ -268,6 +279,41 @@ export default function ConsoleDashboard() {
                   <strong>{readyWalletApps.length}</strong>
                 </div>
               </div>
+              <div className="wallet-app-pill-row">
+                {readyWalletApps.length ? (
+                  readyWalletApps.map(({ entry, label }) => {
+                    const isCurrent = wallet?.adapter.name === entry.adapter.name;
+
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        className={`wallet-app-pill wallet-app-pill-button ${isCurrent ? "active" : ""}`}
+                        onClick={() => setVisible(true)}
+                      >
+                        {entry.adapter.icon ? (
+                          <img src={entry.adapter.icon} alt={label} className="wallet-provider-icon wallet-provider-icon-small" />
+                        ) : (
+                          <WalletIcon className="icon-svg icon-svg-sm" />
+                        )}
+                        {label}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="console-inline-note">{t("console.appsEmpty")}</div>
+                )}
+              </div>
+              <p className="field-hint">{t("console.appsHint")}</p>
+              <div className="console-actions-row">
+                <button type="button" className="btn btn-secondary console-inline-action" onClick={() => setVisible(true)}>
+                  <WalletIcon className="icon-svg icon-svg-sm" />
+                  {t("console.changeWallet")}
+                </button>
+                <button type="button" className="btn btn-ghost console-inline-action" onClick={clearWorkspaceState}>
+                  {t("console.clearWallets")}
+                </button>
+              </div>
             </article>
 
             <article className="surface-card feature-surface console-ops-card">
@@ -320,26 +366,6 @@ export default function ConsoleDashboard() {
                   <span className="identity-title">{t("console.network")}</span>
                   <strong>{t("wallet.networkValue")}</strong>
                 </div>
-              </div>
-              <div className="wallet-app-pill-row">
-                {readyWalletApps.length ? (
-                  readyWalletApps.map(({ entry, label }) => {
-                    const isCurrent = wallet?.adapter.name === entry.adapter.name;
-
-                    return (
-                      <span key={label} className={`wallet-app-pill ${isCurrent ? "active" : ""}`}>
-                        {entry.adapter.icon ? (
-                          <img src={entry.adapter.icon} alt={label} className="wallet-provider-icon wallet-provider-icon-small" />
-                        ) : (
-                          <WalletIcon className="icon-svg icon-svg-sm" />
-                        )}
-                        {label}
-                      </span>
-                    );
-                  })
-                ) : (
-                  <div className="console-inline-note">{t("console.appsEmpty")}</div>
-                )}
               </div>
             </article>
           </section>

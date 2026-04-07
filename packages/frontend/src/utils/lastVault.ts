@@ -1,7 +1,7 @@
 import { attachVaultToWallet } from "./walletRegistry";
 
-const LAST_VAULT_STORAGE_KEY = "aegis-last-vault-address";
-const WALLET_VAULT_MAP_STORAGE_KEY = "aegis-wallet-vault-map";
+const LAST_VAULT_STORAGE_KEY = "aegis-last-vault-address-v4";
+const WALLET_VAULT_MAP_STORAGE_KEY = "aegis-wallet-vault-map-v4";
 
 function readWalletVaultMap(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -46,4 +46,10 @@ export function setLastVaultAddress(vaultAddress: string, walletAddress?: string
     writeWalletVaultMap(walletVaultMap);
     attachVaultToWallet(walletAddress, vaultAddress);
   }
+}
+
+export function clearLastVaultState() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(LAST_VAULT_STORAGE_KEY);
+  window.localStorage.removeItem(WALLET_VAULT_MAP_STORAGE_KEY);
 }

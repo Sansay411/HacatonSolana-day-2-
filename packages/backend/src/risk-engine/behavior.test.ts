@@ -47,3 +47,18 @@ test("behavioral analysis detects high frequency, repeat after reject, and categ
   assert.equal(computeBehavioralPenalty(result.flags), 40);
   assert.ok(explainBehavioralFlags(result.flags).length >= 3);
 });
+
+test("russian hosting request matches infra category", () => {
+  const now = 1_715_000_000;
+
+  const result = buildBehavioralContext({
+    description: "Оплата хостинга. Для поддержки работы музыкального сервиса.",
+    allowedCategories: ["infra", "operations"],
+    history: [],
+    now,
+  });
+
+  assert.equal(result.categoryMismatch, false);
+  assert.equal(result.categoryMatch, "infra");
+  assert.equal(result.flags.includes("category_mismatch"), false);
+});

@@ -15,7 +15,7 @@ export const config = {
   ai: {
     provider: process.env.AI_PROVIDER || "gemini",
     geminiApiKey: process.env.GEMINI_API_KEY || "",
-    timeoutMs: parseInt(process.env.AI_TIMEOUT_MS || "3000", 10),
+    timeoutMs: Math.max(20000, parseInt(process.env.AI_TIMEOUT_MS || "20000", 10)),
     model: process.env.GEMINI_MODEL || "gemini-1.5-flash",
   },
   firebase: {

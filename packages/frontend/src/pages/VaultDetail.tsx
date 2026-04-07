@@ -105,7 +105,7 @@ function formatAbsoluteTime(unixSeconds: number, locale: string, fallback: strin
 }
 
 function monitoringStorageKey(kind: "tab" | "wallet", vaultAddress?: string) {
-  return vaultAddress ? `aegis-vault-${kind}:${vaultAddress}` : null;
+  return vaultAddress ? `aegis-vault-v2-${kind}:${vaultAddress}` : null;
 }
 
 function readStoredMonitoringValue(kind: "tab" | "wallet", vaultAddress?: string) {
@@ -143,6 +143,43 @@ function formatAiProviderName(provider?: string | null) {
   const normalized = provider.trim().toLowerCase();
   if (normalized === "gemini") return "Gemini";
   return provider;
+}
+
+function normalizeAiFinding(text: string, t: (key: string) => string) {
+  const value = text.trim();
+
+  switch (value) {
+    case "First request from wallet":
+      return t("vault.aiFinding.firstRequest");
+    case "Low transaction frequency":
+      return t("vault.aiFinding.lowFrequency");
+    case "Consistent small transaction amounts":
+      return t("vault.aiFinding.consistentAmounts");
+    case "Regular but not excessively frequent activity":
+      return t("vault.aiFinding.regularActivity");
+    case "Repeated transaction attempts within a short timeframe":
+      return t("vault.aiFinding.repeatedAttempts");
+    case "Pattern of re-attempting after rejections":
+      return t("vault.aiFinding.repeatAfterReject");
+    case "Attempts to bypass cooldown period":
+      return t("vault.aiFinding.cooldownBypass");
+    default:
+      return value;
+  }
+}
+
+function normalizeAiExplanation(text: string, t: (key: string) => string) {
+  const value = text.trim();
+
+  if (
+    /Transaction rejected due to category mismatch and a risk score exceeding the vault's threshold\./i.test(
+      value
+    )
+  ) {
+    return t("vault.aiExplanationText.categoryMismatchThreshold");
+  }
+
+  return value;
 }
 
 function getMonitoringLevelLabel(
@@ -376,8 +413,14 @@ function RequestCard({
     };
   }, [req.address]);
 
-  const isResolved = req.status !== "pending";
-  const aiStatus = detail?.aiEvaluation?.status || (req.status === "pending" ? "in_progress" : "unavailable");
+  const effectiveStatus =
+    detail?.processingStatus === "failed"
+      ? "failed"
+      : req.status;
+  const isResolved = effectiveStatus !== "pending";
+  const aiStatus =
+    detail?.aiEvaluation?.status ||
+    (effectiveStatus === "pending" ? "in_progress" : "unavailable");
   const aiRiskScore = detail?.aiEvaluation?.riskScore ?? null;
   const visibleRiskScore = aiStatus === "available" ? aiRiskScore : null;
 
@@ -389,16 +432,20 @@ function RequestCard({
         : { label: `${t("vault.risk.high")} ${t("vault.riskSuffix")}`, className: "high", color: "var(--danger)" };
 
   const statusClass =
-    req.status === "pending"
+    effectiveStatus === "failed"
+      ? "status-pill-danger"
+      : effectiveStatus === "pending"
       ? "status-pill-warning"
-      : req.status === "approved"
+      : effectiveStatus === "approved"
         ? "status-pill-success"
         : "status-pill-danger";
 
   const statusLabel =
-    req.status === "pending"
+    effectiveStatus === "failed"
+      ? t("vault.failed")
+      : effectiveStatus === "pending"
       ? t("vault.pending")
-      : req.status === "approved"
+      : effectiveStatus === "approved"
         ? t("vault.approved")
         : t("vault.rejected");
 
@@ -492,6 +539,19 @@ function RequestCard({
     if (flag === "suspicious_pattern") return t("vault.behaviorFlag.suspiciousPattern");
     return flag;
   });
+  const localizedAiExplanation = detail?.aiEvaluation?.explanation
+    ? normalizeAiExplanation(detail.aiEvaluation.explanation, t)
+    : null;
+  const suppressLowSignalAiFindings =
+    detail?.finalDecisionSummary?.decision === "rejected" &&
+    ((detail?.aiEvaluation?.behaviorFlags || []).includes("category_mismatch") ||
+      (detail?.aiEvaluation?.behaviorFlags || []).includes("suspicious_pattern"));
+  const localizedAiFindings = (detail?.aiEvaluation?.findings || [])
+    .filter((reason) =>
+      !suppressLowSignalAiFindings ||
+      !["First request from wallet", "Low transaction frequency"].includes(reason.trim())
+    )
+    .map((reason) => normalizeAiFinding(reason, t));
 
   const operatingModeLabel =
     detail?.finalDecisionSummary?.operatingMode === "safe_mode"
@@ -500,6 +560,10 @@ function RequestCard({
   const isFallbackMode = detail?.finalDecisionSummary?.decisionSource === "fallback_safety_engine";
   const isFallbackRejected =
     isFallbackMode && detail?.finalDecisionSummary?.decision === "rejected";
+  const thresholdExceeded =
+    typeof detail?.aiEvaluation?.effectiveRisk === "number" &&
+    typeof threshold === "number" &&
+    detail.aiEvaluation.effectiveRisk > threshold;
 
   const decisionReasonItems = dedupeList(
     isFallbackRejected
@@ -507,15 +571,21 @@ function RequestCard({
           t("vault.decisionReason.fallbackMode"),
           t("vault.decisionReason.fallbackProtect"),
         ]
+      : detail?.processingStatus === "failed"
+      ? [
+          detail.processingError,
+        ]
       : detail?.finalDecisionSummary?.decision === "approved"
       ? [
           t("vault.decisionReason.approvedThreshold"),
           t("vault.decisionReason.approvedPolicy"),
         ]
       : [
-          detail?.policyEnforcement?.overrideReason || finalDecisionReasons[0] || null,
+          detail?.policyEnforcement?.overrideReason || detail?.aiEvaluation?.explanation || null,
+          thresholdExceeded ? t("vault.decisionReason.exceedsThreshold") : null,
+          behaviorFlagLabels.length > 0 ? behaviorFlagLabels[0] : null,
           failedPolicyChecks.length > 0 ? `${failedPolicyChecks.join(", ")}: FAILED.` : null,
-          null,
+          finalDecisionReasons[0] || null,
         ]
   ).slice(0, 3);
 
@@ -564,7 +634,7 @@ function RequestCard({
             </div>
           </div>
 
-          {detail?.aiEvaluation?.inProgress || (req.status === "pending" && !detail?.processingError) ? (
+          {detail?.aiEvaluation?.inProgress || (effectiveStatus === "pending" && !detail?.processingError) ? (
             <p className="request-ai-reason request-ai-reason-pending">{t("vault.aiEvaluatingStructured")}</p>
           ) : visibleRiskScore !== null ? (
             <>
@@ -607,23 +677,25 @@ function RequestCard({
           )}
 
           <div className="request-reasoning-block">
-            {detail?.aiEvaluation?.explanation && (
+            {localizedAiExplanation && (
               <p className="request-ai-reason">
-                <strong>{t("vault.aiExplanation")}</strong> {detail.aiEvaluation.explanation}
+                <strong>{t("vault.aiExplanation")}</strong> {localizedAiExplanation}
               </p>
             )}
             <strong className="request-reasoning-title">{t("vault.aiFindings")}</strong>
-            {detail?.aiEvaluation?.findings?.length ? (
+            {localizedAiFindings.length ? (
               <ul className="request-reasoning-list">
-                {detail.aiEvaluation.findings.map((reason, index) => (
+                {localizedAiFindings.map((reason, index) => (
                   <li key={`${req.address}-ai-${index}`}>{reason}</li>
                 ))}
               </ul>
             ) : (
               <p className="request-section-empty">
-                {aiStatus === "unavailable"
+                {detail?.processingStatus === "failed"
+                  ? t("vault.backendFailed")
+                  : aiStatus === "unavailable"
                   ? t("vault.emptyDash")
-                  : req.status === "pending"
+                  : effectiveStatus === "pending"
                     ? t("vault.aiPending")
                     : aiStatus === "available"
                       ? t("vault.aiFindingsNormal")
@@ -670,7 +742,7 @@ function RequestCard({
             <p className="request-ai-reason">
               <strong>{enforcementReasonLabel}</strong> {detail.policyEnforcement.overrideReason}
             </p>
-          ) : req.status === "pending" ? (
+          ) : effectiveStatus === "pending" ? (
             <p className="request-section-empty">{t("vault.policyWaiting")}</p>
           ) : null}
         </section>
@@ -680,7 +752,9 @@ function RequestCard({
             <strong>{t("vault.section.finalDecision")}</strong>
             <div className="request-ai-strip">
               <span className={`status-pill ${statusClass}`}>{statusLabel}</span>
-              <span className="status-pill status-pill-muted">{decisionSourceLabel}</span>
+              <span className="status-pill status-pill-muted">
+                {detail?.processingStatus === "failed" ? t("vault.backendFailed") : decisionSourceLabel}
+              </span>
               <span className="status-pill status-pill-muted">{`${t("vault.operatingMode")}: ${operatingModeLabel}`}</span>
             </div>
           </div>
@@ -711,7 +785,9 @@ function RequestCard({
             </div>
           )}
 
-          {detail?.finalDecisionSummary?.decision === "rejected" && (
+          {detail?.processingStatus === "failed" ? (
+            <p className="request-ai-reason request-impact-line">{t("vault.backendFailedLine")}</p>
+          ) : detail?.finalDecisionSummary?.decision === "rejected" && (
             <p className="request-ai-reason request-impact-line">
               {isFallbackRejected ? t("vault.decisionImpact.safeMode") : t("vault.decisionImpact.rejected")}
             </p>
