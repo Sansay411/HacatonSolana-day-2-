@@ -14,7 +14,7 @@
 
 ### 🌐 Language / Язык
 > **Looking for the Russian version of this documentation?**  
-> 🇷🇺 [Читать документацию на русском языке](./README.ru.md)
+> 🇷🇺 [Читать документацию на русском языке](#-aegis-funding-vault-на-русском)
 
 ---
 
@@ -56,3 +56,41 @@ Money is never transferred instantly. The system processes the request, evaluate
 ### 1. Installation
 ```bash
 npm install
+2. Smart Contract Compilation & Testing
+Bash
+anchor build
+anchor test
+3. Environment Setup
+Copy the configuration templates in both backend and frontend folders:
+
+Bash
+cp packages/backend/.env.example packages/backend/.env
+cp packages/frontend/.env.example packages/frontend/.env
+⚠️ Important Variables to Fill:
+
+Backend: GEMINI_API_KEY, SOLANA_RPC_URL, RISK_AUTHORITY_SECRET_KEY, PROGRAM_ID
+
+Frontend: Firebase credentials (pre-configured defaults are included, replace if using a custom project).
+
+4. Running the Application
+Start Backend Server:
+
+Bash
+npm run dev:backend
+Start Frontend Client:
+
+Bash
+npm run dev:frontend
+Open http://localhost:5173/ to interact with the dApp.
+
+🔍 Key Code Locations
+Smart Contract Logic: programs/aegis_vault/src/lib.rs
+
+AI Evaluation Module: packages/backend/src/ai/evaluateRequest.ts
+
+Solana Event Listener: packages/backend/src/solana/listener.ts
+
+Core UI Pages: packages/frontend/src/pages/
+
+📄 License
+Distributed under the Apache 2.0 License. See LICENSE for more information.
