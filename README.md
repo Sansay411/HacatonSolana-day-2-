@@ -1,7 +1,7 @@
 # 🛡️ Aegis Funding Vault
 
 <p align="center">
-  <img src="./logo/logo.png" alt="Aegis Vault Logo" width="120px" role="presentation"/>
+  <img src="./logo/Logo.png" alt="Aegis Vault Logo" width="120px" role="presentation"/>
 </p>
 
 <p align="center">
