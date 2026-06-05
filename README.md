@@ -1,212 +1,58 @@
-# Aegis Funding Vault
+# 🛡️ Aegis Funding Vault
 
-## Что это
+<p align="center">
+  <img src="./logo/logo.png" alt="Aegis Vault Logo" width="120px" role="presentation"/>
+</p>
 
-Aegis Funding Vault помогает выдавать деньги не вручную, а по понятным правилам.
+<p align="center">
+  <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"/>
+  <img src="https://img.shields.io/badge/Solana-Anchor%200.32.1-purple.svg" alt="Solana Anchor"/>
+  <img src="https://img.shields.io/badge/Language-TypeScript%20%7C%20Rust-orange.svg" alt="Languages"/>
+</p>
 
-Как это работает простыми словами:
+---
 
-1. Фаундер создает vault и кладет туда SOL.
-2. Получатель не может просто забрать деньги.
-3. Он отправляет запрос на расход с описанием цели.
-4. Сервер проверяет запрос через Gemini и через жесткие правила.
-5. После этого система принимает решение.
-6. Решение записывается в сеть Solana.
+### 🌐 Language / Язык
+> **Looking for the Russian version of this documentation?**  
+> 🇷🇺 [Читать документацию на русском языке](./README.ru.md)
 
-Проект подходит для:
+---
 
-- грантов
-- акселераторов
-- стипендий
-- контролируемых выплат командам
+## 📝 Overview
 
-## Что уже работает
+**Aegis Funding Vault** is an open-source decentralized application (dApp) built on the Solana blockchain using the Anchor framework. It automates financial distributions (grants, scholarships, accelerator funding, or managed team payouts) based on programmable constraints and AI-driven validation guardrails rather than manual operations.
 
-- создание vault
-- пополнение vault
-- отправка запроса на расход
-- проверка запроса через AI
-- запасной безопасный режим, если AI недоступен
-- approve и reject в сети Solana
-- история решений с понятным объяснением
-- вход через Firebase
-- подключение Solana кошелька
+### Key Philosophy:
+Money is never transferred instantly. The system processes the request, evaluates it using an AI agent combined with hardcoded backend rules, and only then executes the transaction on-chain.
 
-## Как устроен проект
+### How It Works:
+1. **Deposit:** A founder creates a vault and funds it with SOL.
+2. **Request:** A recipient submits a spend request with a detailed description.
+3. **AI Guardrail:** The backend analyzes the request via the Gemini API.
+4. **Validation:** The backend passes the AI evaluation results through strict structural validation rules.
+5. **On-Chain Settlement:** The verified decision is immutable and submitted directly to the Solana network (Approve/Reject).
+6. **Fallback Mode:** A secure manual/hardware rule mode triggers automatically if the AI service becomes unavailable.
 
-### `programs/aegis_vault`
+---
 
-Смарт контракт на Anchor.
-Он хранит vault, правила и запросы.
+## 🛠 Repository Structure
 
-### `packages/backend`
+| Directory | Technology | Description |
+| :--- | :--- | :--- |
+| `programs/aegis_vault` | **Rust / Anchor** | Smart contract storing vaults, rules, and tracking requests. |
+| `packages/backend` | **Node.js / Express** | Handles Gemini API evaluations and execution routing. |
+| `packages/frontend` | **TypeScript / React** | UI for wallet connection, vault creation, and decision history. |
+| `packages/shared` | **TypeScript** | Universal types and configuration constants. |
 
-Сервер.
-Он получает запросы, обращается к Gemini, проверяет правила и отправляет итоговое решение в Solana.
+---
 
-### `packages/frontend`
+## 🚀 Quick Start
 
-Интерфейс.
-Через него пользователь входит в продукт, подключает кошелек, создает vault и смотрит историю решений.
+### Prerequisites
+* **Node.js** v18 or newer
+* **Rust** & **Solana CLI**
+* **Anchor CLI** v0.32.1
 
-### `packages/shared`
-
-Общие типы и константы.
-
-## Что нужно для запуска
-
-- Node.js 18 или новее
-- Rust
-- Solana CLI
-- Anchor CLI 0.32.1
-
-## Быстрый запуск
-
-### 1. Установить зависимости
-
+### 1. Installation
 ```bash
 npm install
-```
-
-### 2. Собрать смарт контракт
-
-```bash
-anchor build
-```
-
-### 3. Подготовить backend
-
-Скопируйте пример:
-
-```bash
-cp packages/backend/.env.example packages/backend/.env
-```
-
-Что нужно заполнить:
-
-- `SOLANA_RPC_URL`
-- `RISK_AUTHORITY_SECRET_KEY`
-- `PROGRAM_ID`
-- `GEMINI_API_KEY`
-
-### 4. Подготовить frontend
-
-Скопируйте пример:
-
-```bash
-cp packages/frontend/.env.example packages/frontend/.env
-```
-
-Во frontend уже лежат настройки Firebase.
-Если у вас другой проект Firebase, замените их на свои.
-
-### 5. Запустить backend
-
-```bash
-npm run dev:backend
-```
-
-### 6. Запустить frontend
-
-В другом терминале:
-
-```bash
-npm run dev:frontend
-```
-
-### 7. Открыть проект
-
-```text
-http://localhost:5173/
-```
-
-## Проверка проекта
-
-### Сборка смарт контракта
-
-```bash
-anchor build
-```
-
-### Тесты смарт контракта
-
-```bash
-anchor test
-```
-
-### Сборка frontend
-
-```bash
-cd packages/frontend
-npm run build
-```
-
-### Сборка backend
-
-```bash
-cd packages/backend
-npm run build
-```
-
-## Мысль проекта
-
-Главная мысль проекта:
-
-Деньги не уходят сразу.
-Сначала система думает, потом проверяет правила, и только после этого разрешает или запрещает выплату.
-
-Что важно подчеркнуть:
-
-- AI участвует в принятии решения
-- backend не верит AI вслепую
-- итог все равно проходит через правила
-- решение доходит до сети Solana
-
-## Какие файлы важны
-
-### Смарт контракт
-
-- `programs/aegis_vault/src/lib.rs`
-
-### Backend
-
-- `packages/backend/src/index.ts`
-- `packages/backend/src/solana/listener.ts`
-- `packages/backend/src/routes/spend-request.ts`
-- `packages/backend/src/ai/evaluateRequest.ts`
-
-### Frontend
-
-- `packages/frontend/src/App.tsx`
-- `packages/frontend/src/pages/Landing.tsx`
-- `packages/frontend/src/pages/CreateVault.tsx`
-- `packages/frontend/src/pages/VaultDetail.tsx`
-
-## Частые проблемы
-
-### Не создается vault
-
-Проверьте:
-
-- подключен ли кошелек
-- хватает ли SOL на создание аккаунтов и пополнение
-- совпадает ли `RISK_AUTHORITY_SECRET_KEY` с backend
-
-### Белый экран
-
-Проверьте:
-
-- создан ли `packages/frontend/.env`
-- правильно ли заполнены данные Firebase
-
-### Запрос висит без решения
-
-Проверьте:
-
-- запущен ли backend
-- отвечает ли `http://localhost:3001/api/health`
-- есть ли SOL у backend ключа на комиссии
-
-## Лицензия
-
-Apache-2.0
