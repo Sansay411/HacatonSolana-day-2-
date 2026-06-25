@@ -13,6 +13,8 @@ dist/
 packages/backend/.env
 packages/frontend/.env
 packages/backend/*.db
+packages/backend/*.db-wal
+packages/backend/*.db-shm
 
 # IDE
 .idea/

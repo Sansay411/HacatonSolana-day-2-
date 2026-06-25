@@ -42,6 +42,12 @@ pub enum AegisError {
     #[msg("Insufficient vault balance for this operation")]
     InsufficientBalance,
 
+    #[msg("Signer is not authorized for this action")]
+    UnauthorizedSigner,
+
+    #[msg("Beneficiary account does not match vault beneficiary")]
+    InvalidBeneficiary,
+
     #[msg("Deposit amount must be greater than zero")]
     ZeroDeposit,
 
