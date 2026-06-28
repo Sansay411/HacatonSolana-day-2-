@@ -126,7 +126,7 @@ pub fn handler(ctx: Context<ApproveSpendRequest>, risk_score: u8) -> Result<()> 
 pub struct ApproveSpendRequest<'info> {
     /// The risk authority (backend keypair) approving the request.
     #[account(
-        constraint = risk_authority.key() == vault.risk_authority @ AegisError::InsufficientBalance
+        constraint = risk_authority.key() == vault.risk_authority @ AegisError::UnauthorizedRiskAuthority
     )]
     pub risk_authority: Signer<'info>,
 

@@ -29,7 +29,7 @@ pub fn handler(ctx: Context<UnfreezeVault>) -> Result<()> {
 pub struct UnfreezeVault<'info> {
     /// Only the funder can unfreeze.
     #[account(
-        constraint = funder.key() == vault.funder @ AegisError::InsufficientBalance
+        constraint = funder.key() == vault.funder @ AegisError::UnauthorizedFunder
     )]
     pub funder: Signer<'info>,
 

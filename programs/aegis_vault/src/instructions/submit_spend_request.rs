@@ -60,7 +60,7 @@ pub struct SubmitSpendRequest<'info> {
     /// The beneficiary submitting the request.
     #[account(
         mut,
-        constraint = beneficiary.key() == vault.beneficiary @ AegisError::InsufficientBalance
+        constraint = beneficiary.key() == vault.beneficiary @ AegisError::UnauthorizedBeneficiary
     )]
     pub beneficiary: Signer<'info>,
 
