@@ -32,7 +32,7 @@ pub fn handler(ctx: Context<FreezeVault>) -> Result<()> {
 pub struct FreezeVault<'info> {
     /// Only the funder can freeze.
     #[account(
-        constraint = funder.key() == vault.funder @ AegisError::InsufficientBalance
+        constraint = funder.key() == vault.funder @ AegisError::UnauthorizedFunder
     )]
     pub funder: Signer<'info>,
 

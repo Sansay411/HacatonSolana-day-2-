@@ -58,7 +58,7 @@ pub struct CloseVault<'info> {
     /// Only the funder can close the vault.
     #[account(
         mut,
-        constraint = funder.key() == vault.funder @ AegisError::InsufficientBalance
+        constraint = funder.key() == vault.funder @ AegisError::UnauthorizedFunder
     )]
     pub funder: Signer<'info>,
 

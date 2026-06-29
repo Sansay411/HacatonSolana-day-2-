@@ -32,15 +32,28 @@ pub enum AegisError {
     #[msg("Spend request is not in Pending status")]
     RequestNotPending,
 
+    // === Authorization ===
+
+    #[msg("Only the funder can perform this action")]
+    UnauthorizedFunder,
+
+    #[msg("Only the beneficiary can perform this action")]
+    UnauthorizedBeneficiary,
+
+    #[msg("Only the risk authority can perform this action")]
+    UnauthorizedRiskAuthority,
+
     // === Arithmetic ===
 
     #[msg("Arithmetic overflow detected")]
     ArithmeticOverflow,
 
-    // === Authorization ===
+    // === Balance ===
 
     #[msg("Insufficient vault balance for this operation")]
     InsufficientBalance,
+
+    // === Input Validation ===
 
     #[msg("Deposit amount must be greater than zero")]
     ZeroDeposit,

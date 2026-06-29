@@ -52,7 +52,7 @@ pub struct Deposit<'info> {
     /// The funder depositing SOL.
     #[account(
         mut,
-        constraint = funder.key() == vault.funder @ AegisError::InsufficientBalance
+        constraint = funder.key() == vault.funder @ AegisError::UnauthorizedFunder
     )]
     pub funder: Signer<'info>,
 
