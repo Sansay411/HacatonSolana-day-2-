@@ -153,7 +153,8 @@ export function buildBehavioralContext(input: BehavioralContextInput): Behaviora
   const requestsInWindow = input.history.filter((item) => input.now - item.createdAt <= 10 * 60);
   const rejectCount = input.history.filter((item) => item.decision === "rejected").length;
   const categoryMatch = detectCategoryMatch(input.description, input.allowedCategories);
-  const categoryMismatch = false;
+  // Category mismatch: allowed categories are configured but description doesn't match any
+  const categoryMismatch = input.allowedCategories.length > 0 && categoryMatch === null;
 
   const flags: AIBehaviorFlag[] = [];
 
@@ -167,6 +168,10 @@ export function buildBehavioralContext(input: BehavioralContextInput): Behaviora
 
   if (requestsInWindow.length >= 3 || rejectCount >= 2) {
     flags.push("suspicious_pattern");
+  }
+
+  if (categoryMismatch) {
+    flags.push("category_mismatch");
   }
 
   return {
