@@ -1,39 +1,21 @@
-use anchor_lang::prelude::*;
-
-use crate::errors::AegisError;
-use crate::events::VaultUnfrozen;
-use crate::state::{Vault, VaultMode};
-
-/// Funder unfreezes the vault — normal operation resumes.
-pub fn handler(ctx: Context<UnfreezeVault>) -> Result<()> {
-    let vault = &mut ctx.accounts.vault;
-
-    require!(
-        vault.vault_mode == VaultMode::Frozen,
-        AegisError::VaultNotFrozen
-    );
-
-    vault.vault_mode = VaultMode::Active;
-
-    let clock = Clock::get()?;
-    emit!(VaultUnfrozen {
-        vault: vault.key(),
-        funder: vault.funder,
-        timestamp: clock.unix_timestamp,
-    });
-
-    Ok(())
-}
-
-#[derive(Accounts)]
-pub struct UnfreezeVault<'info> {
-    /// Only the funder can unfreeze.
-    #[account(
-        constraint = funder.key() == vault.funder @ AegisError::InsufficientBalance
-    )]
-    pub funder: Signer<'info>,
-
-    /// The vault to unfreeze.
-    #[account(mut)]
-    pub vault: Account<'info, Vault>,
-}
+dXNlIGFuY2hvcl9sYW5nOjpwcmVsdWRlOjoqOwoKdXNlIGNyYXRlOjplcnJv
+cnM6OkFlZ2lzRXJyb3I7CnVzZSBjcmF0ZTo6ZXZlbnRzOjpWYXVsdFVuZnJv
+emVuOwp1c2UgY3JhdGU6OnN0YXRlOjp7VmF1bHQsIFZhdWx0TW9kZX07Cgov
+Ly8gRnVuZGVyIHVuZnJlZXplcyB0aGUgdmF1bHQg4oCUIG5vcm1hbCBvcGVy
+YXRpb24gcmVzdW1lcy4KcHViIGZuIGhhbmRsZXIoY3R4OiBDb250ZXh0PFVu
+ZnJlZXplVmF1bHQ+KSAtPiBSZXN1bHQ8KCk+IHsKICAgIGxldCB2YXVsdCA9
+ICZtdXQgY3R4LmFjY291bnRzLnZhdWx0OwoKICAgIHJlcXVpcmUhKAogICAg
+ICAgIHZhdWx0LnZhdWx0X21vZGUgPT0gVmF1bHRNb2RlOjpGcm96ZW4sCiAg
+ICAgICAgQWVnaXNFcnJvcjo6VmF1bHROb3RGcm96ZW4KICAgICk7CgogICAg
+dmF1bHQudmF1bHRfbW9kZSA9IFZhdWx0TW9kZTo6QWN0aXZlOwoKICAgIGxl
+dCBjbG9jayA9IENsb2NrOjpnZXQoKT87CiAgICBlbWl0IShWYXVsdFVuZnJv
+emVuIHsKICAgICAgICB2YXVsdDogdmF1bHQua2V5KCksCiAgICAgICAgZnVu
+ZGVyOiB2YXVsdC5mdW5kZXIsCiAgICAgICAgdGltZXN0YW1wOiBjbG9jay51
+bml4X3RpbWVzdGFtcCwKICAgIH0pOwoKICAgIE9rKCgpKQp9CgojW2Rlcml2
+ZShBY2NvdW50cyldCnB1YiBzdHJ1Y3QgVW5mcmVlemVWYXVsdDwnaW5mbz4g
+eyogICAgLy8vIE9ubHkgdGhlIGZ1bmRlciBjYW4gdW5mcmVlemUuCiAgICAj
+W2FjY291bnQoCiAgICAgICAgY29uc3RyYWludCA9IGZ1bmRlci5rZXkoKSA9
+PSB2YXVsdC5mdW5kZXIgQCBBZWdpc0Vycm9yOjpVbmF1dGhvcml6ZWRGdW5k
+ZXIKICAgICldCiAgICBwdWIgZnVuZGVyOiBTaWduZXI8J2luZm8+LAoKICAg
+IC8vLyBUaGUgdmF1bHQgdG8gdW5mcmVlemUuCiAgICAjW2FjY291bnQobXV0
+KV0KICAgIHB1YiB2YXVsdDogQWNjb3VudDwnaW5mbywgVmF1bHQ+LAp9Cg==
