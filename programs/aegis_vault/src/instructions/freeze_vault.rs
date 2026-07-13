@@ -1,42 +1,24 @@
-use anchor_lang::prelude::*;
-
-use crate::errors::AegisError;
-use crate::events::VaultFrozen;
-use crate::state::{Vault, VaultMode};
-
-/// Funder freezes the vault — all spend requests will be rejected.
-///
-/// This is the emergency escape hatch. Funder can freeze at any time
-/// regardless of backend status. This is a core guardrail.
-pub fn handler(ctx: Context<FreezeVault>) -> Result<()> {
-    let vault = &mut ctx.accounts.vault;
-
-    require!(
-        vault.vault_mode == VaultMode::Active,
-        AegisError::VaultNotActive
-    );
-
-    vault.vault_mode = VaultMode::Frozen;
-
-    let clock = Clock::get()?;
-    emit!(VaultFrozen {
-        vault: vault.key(),
-        funder: vault.funder,
-        timestamp: clock.unix_timestamp,
-    });
-
-    Ok(())
-}
-
-#[derive(Accounts)]
-pub struct FreezeVault<'info> {
-    /// Only the funder can freeze.
-    #[account(
-        constraint = funder.key() == vault.funder @ AegisError::InsufficientBalance
-    )]
-    pub funder: Signer<'info>,
-
-    /// The vault to freeze.
-    #[account(mut)]
-    pub vault: Account<'info, Vault>,
-}
+dXNlIGFuY2hvcl9sYW5nOjpwcmVsdWRlOjoqOwoKdXNlIGNyYXRlOjplcnJv
+cnM6OkFlZ2lzRXJyb3I7CnVzZSBjcmF0ZTo6ZXZlbnRzOjpWYXVsdEZyb3pl
+bjsKdXNlIGNyYXRlOjpzdGF0ZTo6e1ZhdWx0LCBWYXVsdE1vZGV9OwoKLy8v
+IEZ1bmRlciBmcmVlemVzIHRoZSB2YXVsdCDigJQgYWxsIHNwZW5kIHJlcXVl
+c3RzIHdpbGwgYmUgcmVqZWN0ZWQuCi8vLwovLy8gVGhpcyBpcyB0aGUgZW1l
+cmdlbmN5IGVzY2FwZSBoYXRjaC4gRnVuZGVyIGNhbiBmcmVlemUgYXQgYW55
+IHRpbWUKLy8vIHJlZ2FyZGxlc3Mgb2YgYmFja2VuZCBzdGF0dXMuIFRoaXMg
+aXMgYSBjb3JlIGd1YXJkcmFpbC4KcHViIGZuIGhhbmRsZXIoY3R4OiBDb250
+ZXh0PEZyZWV6ZVZhdWx0PikgLT4gUmVzdWx0PCgpPiB7CiAgICBsZXQgdmF1
+bHQgPSAmbXV0IGN0eC5hY2NvdW50cy52YXVsdDsKCiAgICByZXF1aXJlISgK
+ICAgICAgICB2YXVsdC52YXVsdF9tb2RlID09IFZhdWx0TW9kZTo6QWN0aXZl
+LAogICAgICAgIEFlZ2lzRXJyb3I6OlZhdWx0Tm90QWN0aXZlCiAgICApOwoK
+ICAgIHZhdWx0LnZhdWx0X21vZGUgPSBWYXVsdE1vZGU6OkZyb3plbjsKCiAg
+ICBsZXQgY2xvY2sgPSBDbG9jazo6Z2V0KCk/OwogICAgZW1pdCEoVmF1bHRG
+cm96ZW4gewogICAgICAgIHZhdWx0OiB2YXVsdC5rZXkoKSwKICAgICAgICBm
+dW5kZXI6IHZhdWx0LmZ1bmRlciwKICAgICAgICB0aW1lc3RhbXA6IGNsb2Nr
+LnVuaXhfdGltZXN0YW1wLAogICAgfSk7CgogICAgT2soKCkpCn0KCiNbZGVy
+aXZlKEFjY291bnRzKV0KcHViIHN0cnVjdCBGcmVlemVWYXVsdDwnaW5mbz4g
+ewogICAgLy8vIE9ubHkgdGhlIGZ1bmRlciBjYW4gZnJlZXplLgogICAgI1th
+Y2NvdW50KAogICAgICAgIGNvbnN0cmFpbnQgPSBmdW5kZXIua2V5KCkgPT0g
+dmF1bHQuZnVuZGVyIEAgQWVnaXNFcnJvcjo6VW5hdXRob3JpemVkRnVuZGVy
+CiAgICApXQogICAgcHViIGZ1bmRlcjogU2lnbmVyPCdpbmZvPiwKCiAgICAv
+Ly8gVGhlIHZhdWx0IHRvIGZyZWV6ZS4KICAgICNbYWNjb3VudChtdXQpXQog
+ICAgcHViIHZhdWx0OiBBY2NvdW50PCdpbmZvLCBWYXVsdD4sCn0K
