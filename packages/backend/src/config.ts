@@ -1,35 +1,20 @@
-import dotenv from "dotenv";
-dotenv.config();
-
-export const config = {
-  solana: {
-    rpcUrl: process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
-    riskAuthoritySecretKey: process.env.RISK_AUTHORITY_SECRET_KEY || "",
-    programId:
-      process.env.PROGRAM_ID || "9Z6HNGC1wz6ukVCD3qNqnfFMDfCffNPBz6dG5k8fakHc",
-  },
-  server: {
-    port: parseInt(process.env.PORT || "3001", 10),
-    corsOrigin: process.env.CORS_ORIGIN || "http://localhost:5173",
-  },
-  ai: {
-    provider: process.env.AI_PROVIDER || "gemini",
-    geminiApiKey: process.env.GEMINI_API_KEY || "",
-    timeoutMs: Math.max(20000, parseInt(process.env.AI_TIMEOUT_MS || "20000", 10)),
-    model: process.env.GEMINI_MODEL || "gemini-1.5-flash",
-  },
-  firebase: {
-    projectId: process.env.FIREBASE_PROJECT_ID || "",
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
-    privateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
-    requireVerifiedAuth: process.env.FIREBASE_REQUIRE_AUTH === "true",
-  },
-  risk: {
-    /** Auto-approve below this score */
-    approveThreshold: 50,
-    /** Auto-reject above this score */
-    rejectThreshold: 70,
-    /** Polling interval for new spend requests (ms) */
-    pollInterval: parseInt(process.env.RISK_POLL_INTERVAL_MS || "12000", 10),
-  },
-};
+aW1wb3J0ICogYXMgZG90ZW52IGZyb20gImRvdGVudiI7CmRvdGVudi5jb25m
+aWcoKTsKCmZ1bmN0aW9uIHJlcXVpcmVFbnYoa2V5OiBzdHJpbmcpOiBzdHJp
+bmcgewogIGNvbnN0IHZhbHVlID0gcHJvY2Vzcy5lbnZba2V5XTsKICBpZiAo
+dmFsdWUgPT09IHVuZGVmaW5lZCkgewogICAgdGhyb3cgbmV3IEVycm9yKGBN
+aXNzaW5nIHJlcXVpcmVkIGVudmlyb25tZW50IHZhcmlhYmxlOiAke2tleX1g
+KTsKICB9CiAgcmV0dXJuIHZhbHVlOwp9CgpleHBvcnQgY29uc3QgY29uZmln
+ID0gewogIEdFTUlOSV9BUElfS0VZOiByZXF1aXJlRW52KCJHRU1JTklfQVBJ
+X0tFWSIpLAogIEZJUkVCQVNFX1BST0pFQ1RfSUQ6IHJlcXVpcmVFbnYoIkZJ
+UkVCQVNFX1BST0pFQ1RfSUQiKSwKICBGSVJFQkFTRV9DTElFTlRfRU1BSUw6
+IHJlcXVpcmVFbnYoIkZJUkVCQVNFX0NMSUVOVF9FTUFJTCIpLAogIEZJUkVC
+QVNFX1BSSVZBVEVfS0VZOiByZXF1aXJlRW52KCJGSVJFQkFTRV9QUklWQVRF
+X0tFWSIpLAogIFBPUlQ6IHByb2Nlc3MuZW52LlBPUlQgPz8gIjMwMDEiLAoK
+ICBzZXJ2ZXI6IHsKICAgIGNvcnNPcmlnaW46IHByb2Nlc3MuZW52LkNPUlNf
+T1JJR0lOID8/ICIqIiwKICAgIHBvcnQ6IHByb2Nlc3MuZW52LlBPUlQgPz8g
+IjMwMDEiLAogIH0sCgogIHNvbGFuYTogewogICAgcmFjVXJsOiByZXF1aXJl
+RW52KCJTT0xBTkFfUlBDX1VSTCIpLAogICAgcHJvZ3JhbUlkOiByZXF1aXJl
+RW52KCJTT0xBTkFfUFJPR1JBTV9JRCIpLAogIH0sCgogIGFpOiB7CiAgICBw
+cm92aWRlcjogcHJvY2Vzcy5lbnYuQUlfUFJPVklERVIgPz8gImdlbWluaSIs
+CiAgICB0aW1lb3V0TXM6IHBhcnNlSW50KHByb2Nlc3MuZW52LkFJX1RJTUVP
+VVRfTVMgPz8gIjMwMDAwIiwgMTApLAogIH0sCn07Cg==
